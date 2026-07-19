@@ -45,3 +45,13 @@ def diagnose(req: DiagnoseRequest) -> DiagnoseResponse:
         comment=comment,
         tags=tags,
     )
+from fastapi import Query
+from app.schemas import Exercise, ExerciseResponse
+from app.exercises import EXERCISES
+
+
+@router.get("/exercises", response_model=ExerciseResponse)
+def exercises(tags: str = Query(..., description="콤마로 구분된 부위 태그 (예: 코어,하체)")) -> ExerciseResponse:
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    found = [e for e in EXERCISES if e["target"] in tag_list]
+    return ExerciseResponse(tags=tag_list, exercises=found)
