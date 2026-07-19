@@ -53,3 +53,18 @@ def exercise_detail(exercise_id: str) -> ExerciseDetail:
         if e["id"] == exercise_id:
             return ExerciseDetail(**e)
     raise HTTPException(status_code=404, detail="운동을 찾을 수 없어요.")
+
+from app.schemas import SessionRequest, SessionResponse
+from app.sessions import SESSIONS, add_session, make_feedback
+
+
+@router.post("/sessions", response_model=SessionResponse)
+def create_session(req: SessionRequest) -> SessionResponse:
+    feedback = make_feedback(req.accuracy)
+    record = add_session({**req.model_dump(), "feedback": feedback})
+    return SessionResponse(**record)
+
+
+@router.get("/sessions", response_model=list[SessionResponse])
+def list_sessions() -> list[SessionResponse]:
+    return [SessionResponse(**s) for s in SESSIONS]
