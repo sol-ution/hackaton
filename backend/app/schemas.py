@@ -9,20 +9,37 @@ class DiagnoseRequest(BaseModel):
 
 class DiagnoseResponse(BaseModel):
     bmi: float
-    category: str          # 저체중 / 정상 / 과체중 / 비만
-    area: str              # 예: "코어·하체"
-    comment: str           # AI 진단 코멘트
-    tags: list[str]        # 예: ["코어", "하체"]
+    category: str
+    area: str
+    comment: str
+    tags: list[str]
+
 
 class Exercise(BaseModel):
-    abbrev: str        # 약자 (예: SQ)
-    name: str          # 운동 이름
-    target: str        # 부위 태그 (예: 하체)
-    sets: int          # 세트 수
-    reps: str          # 반복 (예: 15회 / 30초)
-    correction: str    # 교정 포인트 (예: 관절 각도 교정)
+    # 2번(운동 추천) 리스트용 요약 정보
+    id: str
+    abbrev: str
+    name: str
+    target: str
+    sets: int
+    reps: str
+    correction: str
 
 
 class ExerciseResponse(BaseModel):
-    tags: list[str]              # 요청한 부위 태그
-    exercises: list[Exercise]    # 추천 운동 목록
+    tags: list[str]
+    exercises: list[Exercise]
+
+
+class ExerciseDetail(BaseModel):
+    # 4번(운동 상세)용 전체 정보
+    id: str
+    abbrev: str
+    name: str
+    target: str
+    subtitle: str
+    sets: int
+    reps: str
+    duration_min: int
+    correction: str
+    guide: list[str]
