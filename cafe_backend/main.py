@@ -27,18 +27,25 @@ KST = timezone(timedelta(hours=9))
 
 # ── 설정 (계약서 §2, 프론트 제안값 그대로) ──
 GPS_RADIUS_M = 150          # 제보 허용 반경 (100m 제안이나 발표장 GPS 여유로 150)
+# 발표는 카페 안이 아니라 발표장에서 하므로, 브라우저가 실제 위치를 잡으면
+# 반경 밖이라 제보가 전부 400으로 막힌다. 데모 중엔 True로 두고 거리만 계산해서 응답에 담는다.
 DEMO_SKIP_GPS = True        # 발표 당일 True(거리검증 통과), 실서비스 False
-CORS_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    # 발표 당일 LAN IP는 여기 추가 (예: "http://192.168.0.10:5173")
-]
+# LAN IP는 와이파이가 바뀔 때마다 달라지므로(172.x / 192.168.x / 10.x),
+# 하나씩 적지 않고 사설 IP 대역 전체를 정규식으로 허용한다.
+# 발표 당일 IP가 뭐로 잡히든 CORS를 다시 손댈 필요가 없다.
+CORS_ORIGIN_REGEX = (
+    r"http://(localhost|127\.0\.0\.1"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})"
+    r":\d+"
+)
 
 app = FastAPI(title="zari API", version="3.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
