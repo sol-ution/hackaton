@@ -106,7 +106,11 @@ class Cafe(BaseModel):
 
     reportCount24h: int = 0             # 최근 24시간 제보 수
     updatedAt: str                      # ISO 8601, 예: 2026-08-06T15:04:00+09:00
-
+    # WF04 상세 화면용 (등록 카페만 값 있음, 미등록은 None)
+    structureNote: Optional[str] = None
+    seatsSolo: Optional[int] = None
+    seatsPair: Optional[int] = None
+    seatsGroup: Optional[int] = None
 
 # ─────────────────────────────────────────────
 # 제보 요청/응답  (POST /reports)

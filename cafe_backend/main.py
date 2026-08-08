@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import store
+import forecast as forecast_mod
 from crowd_rule import decide_crowd
 from schemas import (
     Cafe, CrowdReportRequest, CrowdReportResponse, OwnerSeatUpdateRequest,
@@ -96,7 +97,12 @@ def build_cafe(row: dict, reports: list[dict], now: datetime) -> Cafe:
         outletLevel=row["outletLevel"] if row.get("outletLevel") else None,
         reportCount24h=rc24,
         updatedAt=row["updatedAt"],
+        structureNote=row.get("structureNote") or None,
+        seatsSolo=i(row.get("seatsSolo")),
+        seatsPair=i(row.get("seatsPair")),
+        seatsGroup=i(row.get("seatsGroup")),
     )
+    
 
 
 @app.get("/api/cafes", response_model=list[Cafe])
@@ -149,30 +155,51 @@ def get_cafe_reports(cafe_id: int):
             "smokingRoom": r["smokingRoom"],
             "visitCount": r["visitCount"],
             "note": r["note"],
+            "nickname": r.get("nickname", ""),
             "reportedAt": r["reportedAt"],
         })
-    return result
+
+    # 오늘(자정 이후) 제보 수 — WF05 상단 "오늘 제보 12건"
+    now = datetime.now(KST)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_count = sum(1 for r in result
+                      if datetime.fromisoformat(r["reportedAt"]) >= midnight)
+
+    return {
+        "cafeId": cafe_id,
+        "todayCount": today_count,
+        "lastReportedAt": result[0]["reportedAt"] if result else None,
+        "totalCount": len(result),
+        "reports": result,
+    }
 
 
 @app.get("/api/cafes/{cafe_id}/history")
 def get_cafe_history(cafe_id: int, day: str = "wed"):
-    # 카페 존재 확인
+    """WF07 시간대별 점유율 그래프. day=mon~sun (평일/주말 곡선이 다름)."""
     cafe = next((r for r in store.load_cafes() if int(r["id"]) == cafe_id), None)
     if cafe is None:
         raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    if day not in forecast_mod.WEEKDAYS:
+        raise HTTPException(status_code=400, detail=f"day는 {forecast_mod.WEEKDAYS} 중 하나")
 
-    # 시간대별 점유율 더미 (9시~21시). 카페마다 살짝 다른 패턴이 나오게 id로 변형.
-    base_pattern = [30, 35, 45, 60, 75, 68, 55, 62, 80, 72, 58, 45, 38]
-    offset = (cafe_id * 7) % 15  # 카페별로 곡선이 조금씩 다르게
+    return {
+        "cafeId": cafe_id,
+        "day": day,
+        "points": forecast_mod.history_points(cafe_id, day),
+    }
 
-    hours = list(range(9, 22))  # 9시~21시
-    points = []
-    for idx, hour in enumerate(hours):
-        pct = base_pattern[idx] + offset
-        pct = max(0, min(100, pct))  # 0~100 범위 안으로
-        points.append({"hour": hour, "occupancyPercent": pct})
 
-    return {"cafeId": cafe_id, "day": day, "points": points}
+@app.get("/api/cafes/{cafe_id}/forecast")
+def get_cafe_forecast(cafe_id: int, minutes: int = 12):
+    """WF04 도착 시점 예측. minutes는 프론트가 도보 시간으로 계산해서 보냄."""
+    cafe = next((r for r in store.load_cafes() if int(r["id"]) == cafe_id), None)
+    if cafe is None:
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    if not 0 <= minutes <= 180:
+        raise HTTPException(status_code=400, detail="minutes는 0~180 사이여야 합니다")
+
+    return forecast_mod.forecast(cafe_id, minutes, datetime.now(KST))
 
 
 @app.post("/api/reports", response_model=CrowdReportResponse)
@@ -200,6 +227,7 @@ def create_report(body: CrowdReportRequest):
         "smokingRoom": body.smokingRoom.value,
         "visitCount": body.visitCount.value,
         "note": body.note,
+        "nickname": "나",
         "reportedAt": datetime.now(KST).isoformat(),
     })
     return CrowdReportResponse(success=True, distanceMeters=round(dist, 1))

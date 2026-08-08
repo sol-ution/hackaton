@@ -17,7 +17,7 @@ _write_lock = threading.Lock()
 
 REPORT_FIELDS = [
     "cafeId", "crowdLevel", "quietScore", "restroomScore", "outletLevel",
-    "smokingRoom", "visitCount", "note", "reportedAt",
+    "smokingRoom", "visitCount", "note", "nickname", "reportedAt",
 ]
 
 

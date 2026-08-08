@@ -1,16 +1,16 @@
-id,name,address,lat,lng,isRegistered,crowdLevel,crowdSource,confidence,occupancyPercent,totalSeats,emptySeats,tags,hasSmokingRoom,restroomScore,quietScore,outletLevel,reportCount24h,kakaoPlaceId,updatedAt
-1,카페 인하로,인천 미추홀구 인하로 105,37.4512,126.6547,true,0,owner,high,35,48,31,study|outlet|quiet,false,4,5,many,6,,2026-08-06T15:02:00+09:00
-2,용현 로스터리,인천 미추홀구 용현동 253-7,37.4489,126.6521,true,2,owner,high,86,36,5,talk|wide-table,true,3,2,normal,11,,2026-08-06T15:00:00+09:00
-3,스터디빈 후문점,인천 미추홀구 인하로67번길 12,37.4503,126.6568,true,3,owner,high,100,60,0,study|outlet|quiet|late-night,false,5,5,many,19,,2026-08-06T15:03:00+09:00
-4,메가커피 인하대점,인천 미추홀구 인하로 100,37.4497,126.654,false,2,report,high,82,,,talk|outlet,false,3,3,many,8,,2026-08-06T14:52:00+09:00
-5,컴포즈커피 용현점,인천 미추홀구 용현동 261-3,37.4478,126.6553,false,1,report,high,68,,,talk,false,2,3,normal,4,,2026-08-06T14:41:00+09:00
-6,투썸플레이스 후문,인천 미추홀구 인하로 118,37.4521,126.6532,false,3,report,high,100,,,study|wide-table|outlet,false,4,3,many,14,,2026-08-06T14:57:00+09:00
-7,이디야커피 용현사거리,인천 미추홀구 용현동 240-1,37.4466,126.6512,false,0,report,low,45,,,quiet|outlet,false,3,4,many,2,,2026-08-06T14:23:00+09:00
-8,빽다방 인하대후문점,인천 미추홀구 인하로67번길 5,37.4508,126.6559,false,2,predicted,low,83,,,talk,false,,,,0,,2026-08-06T14:04:00+09:00
-9,카페 모롱,인천 미추홀구 용현동 267-12,37.4485,126.6576,false,1,predicted,low,65,,,quiet|study,false,,,,0,,2026-08-06T14:04:00+09:00
-10,더치앤빈 용현,인천 미추홀구 용현동 245-9,37.4472,126.6534,false,0,predicted,low,28,,,talk|wide-table,true,,,,0,,2026-08-06T14:04:00+09:00
-11,커피명가 인하점,인천 미추홀구 인하로 92,37.4493,126.6508,false,3,predicted,low,100,,,study|outlet|late-night,false,,,,0,,2026-08-06T14:04:00+09:00
-12,온기다방,인천 미추홀구 용현동 258-4,37.4516,126.6501,false,1,predicted,low,70,,,quiet,false,,,,0,,2026-08-06T14:04:00+09:00
-13,브루잉랩 후문,인천 미추홀구 인하로67번길 22,37.4531,126.6562,false,2,predicted,low,85,,,study|outlet,false,,,,0,,2026-08-06T14:04:00+09:00
-14,이름없는 카페,인천 미추홀구 용현동 271-2,37.4462,126.6571,false,,none,low,,,,,false,,,,0,,2026-08-04T15:04:00+09:00
-15,용현 커피스탠드,인천 미추홀구 용현동 249-15,37.4457,126.6528,false,,none,low,,,,talk,false,,,,0,,2026-08-03T15:04:00+09:00
+id,name,address,lat,lng,isRegistered,crowdLevel,crowdSource,confidence,occupancyPercent,totalSeats,emptySeats,tags,hasSmokingRoom,restroomScore,quietScore,outletLevel,reportCount24h,kakaoPlaceId,updatedAt,structureNote,seatsSolo,seatsPair,seatsGroup
+1,카페 인하로,인천 미추홀구 인하로 105,37.4512,126.6547,true,0,owner,high,35,48,31,study|outlet|quiet,false,4,5,many,6,,2026-08-06T15:02:00+09:00,"1층·2층 좌석 분리, 계단 있음",8,12,4
+2,용현 로스터리,인천 미추홀구 용현동 253-7,37.4489,126.6521,true,2,owner,high,86,36,5,talk|wide-table,true,3,2,normal,11,,2026-08-06T15:00:00+09:00,"단층 구조, 창가 좌석 많음",6,10,3
+3,스터디빈 후문점,인천 미추홀구 인하로67번길 12,37.4503,126.6568,true,3,owner,high,100,60,0,study|outlet|quiet|late-night,false,5,5,many,19,,2026-08-06T15:03:00+09:00,"3층 건물, 2층은 조용한 작업 공간",12,16,6
+4,메가커피 인하대점,인천 미추홀구 인하로 100,37.4497,126.654,false,2,report,high,82,,,talk|outlet,false,3,3,many,8,,2026-08-06T14:52:00+09:00,,,,
+5,컴포즈커피 용현점,인천 미추홀구 용현동 261-3,37.4478,126.6553,false,1,report,high,68,,,talk,false,2,3,normal,4,,2026-08-06T14:41:00+09:00,,,,
+6,투썸플레이스 후문,인천 미추홀구 인하로 118,37.4521,126.6532,false,3,report,high,100,,,study|wide-table|outlet,false,4,3,many,14,,2026-08-06T14:57:00+09:00,,,,
+7,이디야커피 용현사거리,인천 미추홀구 용현동 240-1,37.4466,126.6512,false,0,report,low,45,,,quiet|outlet,false,3,4,many,2,,2026-08-06T14:23:00+09:00,,,,
+8,빽다방 인하대후문점,인천 미추홀구 인하로67번길 5,37.4508,126.6559,false,2,predicted,low,83,,,talk,false,,,,0,,2026-08-06T14:04:00+09:00,,,,
+9,카페 모롱,인천 미추홀구 용현동 267-12,37.4485,126.6576,false,1,predicted,low,65,,,quiet|study,false,,,,0,,2026-08-06T14:04:00+09:00,,,,
+10,더치앤빈 용현,인천 미추홀구 용현동 245-9,37.4472,126.6534,false,0,predicted,low,28,,,talk|wide-table,true,,,,0,,2026-08-06T14:04:00+09:00,,,,
+11,커피명가 인하점,인천 미추홀구 인하로 92,37.4493,126.6508,false,3,predicted,low,100,,,study|outlet|late-night,false,,,,0,,2026-08-06T14:04:00+09:00,,,,
+12,온기다방,인천 미추홀구 용현동 258-4,37.4516,126.6501,false,1,predicted,low,70,,,quiet,false,,,,0,,2026-08-06T14:04:00+09:00,,,,
+13,브루잉랩 후문,인천 미추홀구 인하로67번길 22,37.4531,126.6562,false,2,predicted,low,85,,,study|outlet,false,,,,0,,2026-08-06T14:04:00+09:00,,,,
+14,이름없는 카페,인천 미추홀구 용현동 271-2,37.4462,126.6571,false,,none,low,,,,,false,,,,0,,2026-08-04T15:04:00+09:00,,,,
+15,용현 커피스탠드,인천 미추홀구 용현동 249-15,37.4457,126.6528,false,,none,low,,,,talk,false,,,,0,,2026-08-03T15:04:00+09:00,,,,
