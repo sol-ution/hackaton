@@ -102,7 +102,7 @@ def build_cafe(row: dict, reports: list[dict], now: datetime) -> Cafe:
         seatsPair=i(row.get("seatsPair")),
         seatsGroup=i(row.get("seatsGroup")),
     )
-    
+
 
 
 @app.get("/api/cafes", response_model=list[Cafe])

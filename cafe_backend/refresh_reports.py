@@ -13,6 +13,7 @@ from pathlib import Path
 
 KST = timezone(timedelta(hours=9))
 REPORTS_CSV = Path(__file__).parent / "reports.csv"
+CAFES_CSV = Path(__file__).parent / "cafes.csv"
 
 # (cafeId, crowdLevel, quiet, restroom, outlet, smoking, visit, note, "몇 분 전")
 # 카페4: 30분내 3건+ -> report/high
@@ -34,11 +35,39 @@ SEED = [
 
 FIELDS = ["cafeId", "crowdLevel", "quietScore", "restroomScore", "outletLevel",
           "smokingRoom", "visitCount", "note", "nickname", "reportedAt"]
+
+# 등록 카페(사장님 계정)의 updatedAt도 같이 갱신한다.
+# 안 하면 "실시간 등록 매장"인데 화면에 "2일 전 갱신"으로 떠서 어색하다.
+# {카페id: 몇 분 전}
+CAFE_UPDATED_AGO = {
+    "1": 2,   # 카페 인하로
+    "2": 4,   # 용현 로스터리
+    "3": 1,   # 스터디빈 후문점
+}
+
 now = datetime.now(KST)
 with open(REPORTS_CSV, "w", newline="", encoding="utf-8") as f:
     w = csv.writer(f)
     w.writerow(FIELDS)
-    for (cid, cl, q, r, o, s, v, note, nick, m) in SEED:
+    for (cid, cl, q, r, o, s_, v, note, nick, m) in SEED:
         reported = (now - timedelta(minutes=m)).isoformat()
-        w.writerow([cid, cl, q, r, o, s, v, note, nick, reported])
+        w.writerow([cid, cl, q, r, o, s_, v, note, nick, reported])
+
 print(f"reports.csv 재생성 완료 ({len(SEED)}건, 기준시각 {now.isoformat()})")
+
+# ── 등록 카페 updatedAt 갱신 ──
+rows = list(csv.DictReader(open(CAFES_CSV, encoding="utf-8-sig")))
+updated = []
+for row in rows:
+    ago = CAFE_UPDATED_AGO.get(row["id"])
+    if ago is not None:
+        row["updatedAt"] = (now - timedelta(minutes=ago)).isoformat()
+        updated.append(f'{row["name"]}({ago}분 전)')
+
+fieldnames = list(rows[0].keys())
+with open(CAFES_CSV, "w", newline="", encoding="utf-8") as f:
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+
+print(f"cafes.csv 등록 카페 갱신 완료: {', '.join(updated)}")
