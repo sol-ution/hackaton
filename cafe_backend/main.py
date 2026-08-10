@@ -21,10 +21,12 @@ import store
 import forecast as forecast_mod
 import stamp
 import review
+import owner
 from crowd_rule import decide_crowd
 from schemas import (
     Cafe, CrowdReportRequest, CrowdReportResponse, OwnerSeatUpdateRequest,
     ReviewCreate, ReviewUpdate, InquiryCreate,
+    StoreInfoUpdate, StampSettingsUpdate, CafeRegistrationRequest, ReplyCreate,
 )
 
 KST = timezone(timedelta(hours=9))
@@ -149,8 +151,10 @@ def get_cafe_reports(cafe_id: int):
 
     # 프론트가 쓸 모양으로 정리 (WF05 화면: 혼잡도/시각/후기/인원/태그)
     result = []
-    for r in my_reports:
+    for idx, r in enumerate(my_reports):
         result.append({
+            "reportIndex": idx,
+            "replies": store.replies_for_report(cafe_id, idx),
             "cafeId": int(r["cafeId"]),
             "crowdLevel": int(r["crowdLevel"]),
             "quietScore": int(r["quietScore"]),
@@ -456,6 +460,118 @@ def create_inquiry(body: InquiryCreate):
         "inquiryId": created["inquiryId"],
         "message": "문의가 접수되었습니다. 영업일 기준 1~2일 내 답변드립니다.",
     }
+# ─────────────────────────────────────────────
+# 사장님 - 대시보드 · 매장정보 (WF11, WF12)
+# ─────────────────────────────────────────────
+
+@app.get("/api/owner/{cafe_id}/dashboard")
+def owner_dashboard(cafe_id: int):
+    """오늘 우리 매장 (조회/길찾기/제보) + 손님 제보와 비교."""
+    data = owner.dashboard(cafe_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return data
+
+
+@app.get("/api/owner/{cafe_id}/info")
+def get_store_info(cafe_id: int):
+    """매장 정보 조회 (영업시간·편의시설·좌석 구성)."""
+    data = owner.get_store_info(cafe_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return data
+
+
+@app.patch("/api/owner/{cafe_id}/info")
+def update_store_info(cafe_id: int, body: StoreInfoUpdate):
+    """매장 정보 저장 (WF12 저장하기)."""
+    patch = body.model_dump(exclude_none=True)
+    if "amenities" in patch:
+        patch["amenities"] = {k: v for k, v in patch["amenities"].items() if v is not None}
+    if "seats" in patch:
+        patch["seats"] = {k: v for k, v in patch["seats"].items() if v is not None}
+
+    data = owner.update_store_info(cafe_id, patch)
+    if data is None:
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return {"success": True, "info": data}
+
+
+@app.post("/api/cafes/{cafe_id}/view")
+def count_view(cafe_id: int):
+    """카페 상세 조회수 +1 (사장님 통계용)."""
+    if not owner.increment_counter(cafe_id, "viewCount"):
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return {"success": True}
+
+
+@app.post("/api/cafes/{cafe_id}/directions")
+def count_directions(cafe_id: int):
+    """길찾기 클릭수 +1 (사장님 통계용)."""
+    if not owner.increment_counter(cafe_id, "directionCount"):
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return {"success": True}
+
+
+# ─────────────────────────────────────────────
+# 사장님 - 스탬프 · 쿠폰 관리
+# ─────────────────────────────────────────────
+
+@app.get("/api/owner/{cafe_id}/stamp-settings")
+def get_stamp_settings(cafe_id: int):
+    """스탬프·쿠폰 발행 조건 조회."""
+    data = owner.stamp_settings(cafe_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return data
+
+
+@app.patch("/api/owner/{cafe_id}/stamp-settings")
+def update_stamp_settings(cafe_id: int, body: StampSettingsUpdate):
+    """스탬프·쿠폰 발행 조건 저장."""
+    data = owner.update_stamp_settings(cafe_id, body.model_dump(exclude_none=True))
+    if data is None:
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return {"success": True, "settings": data}
+
+
+@app.get("/api/owner/{cafe_id}/coupons")
+def owner_coupons(cafe_id: int):
+    """사용 대기 / 처리 완료 쿠폰 + 이번 달 통계."""
+    if not any(int(c["id"]) == cafe_id for c in store.load_cafes()):
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return owner.coupon_management(cafe_id)
+
+
+# ─────────────────────────────────────────────
+# 새 카페 등록 신청 (WF10)
+# ─────────────────────────────────────────────
+
+@app.post("/api/cafe-registrations")
+def register_cafe(body: CafeRegistrationRequest):
+    """사업자등록번호 / 전화번호 인증 신청 접수."""
+    created = owner.create_registration(
+        body.cafeName, body.address, body.method, body.value)
+    return {
+        "success": True,
+        "requestId": created["requestId"],
+        "status": "pending",
+        "message": "인증 요청이 접수되었습니다. 영업일 1일 이내 알림으로 안내됩니다.",
+    }
+
+
+# ─────────────────────────────────────────────
+# 제보 답글 (신뢰도 투표)
+# ─────────────────────────────────────────────
+
+@app.post("/api/cafes/{cafe_id}/reports/{report_index}/replies")
+def add_reply(cafe_id: int, report_index: int, body: ReplyCreate):
+    """제보에 답글 달기 (동의/비동의)."""
+    reports = store.reports_for(cafe_id)
+    if not 0 <= report_index < len(reports):
+        raise HTTPException(status_code=404, detail="제보를 찾을 수 없습니다")
+    created = store.add_reply(cafe_id, report_index, body.agree, body.content)
+    return {"success": True, "replyId": created["replyId"]}
 @app.get("/")
 def health():
     return {"status": "ok", "service": "zari API v3"}

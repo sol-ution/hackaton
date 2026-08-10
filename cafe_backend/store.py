@@ -200,3 +200,60 @@ def create_inquiry(name: str, content: str, user_id: int = DEMO_USER_ID) -> dict
                 w.writeheader()
             w.writerow(row)
         return row
+# ─────────────────────────────────────────────
+# 제보 답글 (신뢰도 투표)
+# ─────────────────────────────────────────────
+
+REPLIES_CSV = BASE / "replies.csv"
+REPLY_FIELDS = ["replyId", "reportIndex", "cafeId", "userId",
+                "nickname", "agree", "content", "createdAt"]
+
+
+def load_replies(cafe_id: int | None = None) -> list[dict]:
+    if not REPLIES_CSV.exists():
+        return []
+    with open(REPLIES_CSV, encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    if cafe_id is not None:
+        rows = [r for r in rows if int(r["cafeId"]) == cafe_id]
+    return rows
+
+
+def replies_for_report(cafe_id: int, report_index: int) -> list[dict]:
+    """특정 제보에 달린 답글."""
+    return [
+        {
+            "replyId": int(r["replyId"]),
+            "nickname": r["nickname"],
+            "agree": r["agree"] == "true",
+            "content": r["content"],
+            "createdAt": r["createdAt"],
+        }
+        for r in load_replies(cafe_id)
+        if int(r["reportIndex"]) == report_index
+    ]
+
+
+def add_reply(cafe_id: int, report_index: int, agree: bool,
+              content: str, user_id: int = DEMO_USER_ID) -> dict:
+    """제보에 답글(신뢰도 투표) 달기."""
+    with _write_lock:
+        rows = load_replies()
+        next_id = max((int(r["replyId"]) for r in rows), default=0) + 1
+        row = {
+            "replyId": next_id,
+            "reportIndex": report_index,
+            "cafeId": cafe_id,
+            "userId": user_id,
+            "nickname": "나",
+            "agree": "true" if agree else "false",
+            "content": content,
+            "createdAt": datetime.now(KST).isoformat(),
+        }
+        exists = REPLIES_CSV.exists()
+        with open(REPLIES_CSV, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=REPLY_FIELDS)
+            if not exists:
+                w.writeheader()
+            w.writerow(row)
+        return row

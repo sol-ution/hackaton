@@ -174,3 +174,56 @@ class InquiryCreate(BaseModel):
     """문의하기 body (WF15)."""
     name: str = Field(min_length=1, max_length=30)       # 신청자 이름
     content: str = Field(min_length=1, max_length=1000)  # 문의 내용
+
+# ─────────────────────────────────────────────
+# 사장님 기능 (WF10~12)
+# ─────────────────────────────────────────────
+
+class Amenities(BaseModel):
+    outlet: Optional[bool] = None
+    wifi: Optional[bool] = None
+    quiet: Optional[bool] = None
+    noTimeLimit: Optional[bool] = None
+    smokingRoom: Optional[bool] = None
+    parking: Optional[bool] = None
+
+
+class SeatComposition(BaseModel):
+    total: Optional[int] = Field(default=None, ge=0)
+    solo: Optional[int] = Field(default=None, ge=0)
+    pair: Optional[int] = Field(default=None, ge=0)
+    group: Optional[int] = Field(default=None, ge=0)
+
+
+class StoreInfoUpdate(BaseModel):
+    """매장 정보 저장 body (WF12). 보낸 필드만 반영."""
+    weekdayHours: Optional[str] = None       # "08:00-22:00"
+    weekendHours: Optional[str] = None
+    holiday: Optional[str] = None            # "매주 월요일"
+    structureNote: Optional[str] = Field(default=None, max_length=300)
+    amenities: Optional[Amenities] = None
+    seats: Optional[SeatComposition] = None
+
+
+class StampSettingsUpdate(BaseModel):
+    """스탬프·쿠폰 발행 조건 (사장님 쿠폰 관리)."""
+    reward: Optional[str] = Field(default=None, max_length=50)
+    goal: Optional[int] = Field(default=None, ge=1, le=50)
+    dailyLimit: Optional[int] = Field(default=None, ge=1, le=10)
+    radiusMeters: Optional[int] = Field(default=None, ge=10, le=1000)
+    validDays: Optional[int] = Field(default=None, ge=1, le=365)
+    ownerPin: Optional[str] = Field(default=None, min_length=4, max_length=6)
+
+
+class CafeRegistrationRequest(BaseModel):
+    """새 카페 등록 신청 (WF10)."""
+    cafeName: str = Field(min_length=1, max_length=50)
+    address: str = Field(default="", max_length=100)
+    method: str = Field(default="business")            # business | phone
+    value: str = Field(min_length=1, max_length=30)    # 사업자번호 또는 전화번호
+
+
+class ReplyCreate(BaseModel):
+    """제보 답글(신뢰도 투표)."""
+    agree: bool                                        # 동의 여부
+    content: str = Field(default="", max_length=100)
