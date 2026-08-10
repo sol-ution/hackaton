@@ -20,9 +20,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import store
 import forecast as forecast_mod
 import stamp
+import review
 from crowd_rule import decide_crowd
 from schemas import (
     Cafe, CrowdReportRequest, CrowdReportResponse, OwnerSeatUpdateRequest,
+    ReviewCreate, ReviewUpdate, InquiryCreate,
 )
 
 KST = timezone(timedelta(hours=9))
@@ -383,7 +385,77 @@ def remove_favorite(cafe_id: int):
         raise HTTPException(status_code=404, detail="즐겨찾기에 없는 카페입니다")
     return {"success": True, "cafeId": cafe_id, "isFavorite": False,
             "message": "즐겨찾기를 해제했습니다"}
+# ─────────────────────────────────────────────
+# 리뷰 (WF19 내 활동)
+# ─────────────────────────────────────────────
 
+@app.get("/api/me/reviews")
+def get_my_reviews():
+    """내가 쓴 리뷰 목록 (최신순)."""
+    cafes = {int(c["id"]): c["name"] for c in store.load_cafes()}
+    result = []
+    for r in review.load_reviews():
+        result.append({**r, "cafeName": cafes.get(r["cafeId"], "")})
+    return {"count": len(result), "reviews": result}
+
+
+@app.get("/api/cafes/{cafe_id}/reviews")
+def get_cafe_reviews(cafe_id: int):
+    """카페의 리뷰 전체 + 평균 별점."""
+    if not any(int(c["id"]) == cafe_id for c in store.load_cafes()):
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    summary = review.rating_summary(cafe_id)
+    return {**summary, "reviews": review.reviews_for_cafe(cafe_id)}
+
+
+@app.post("/api/reviews")
+def create_review(body: ReviewCreate):
+    """리뷰 작성."""
+    if not any(int(c["id"]) == body.cafeId for c in store.load_cafes()):
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    created = review.create(body.cafeId, body.rating, body.content, body.tags)
+    return {"success": True, "review": created}
+
+
+@app.patch("/api/reviews/{review_id}")
+def update_review(review_id: int, body: ReviewUpdate):
+    """리뷰 수정 (보낸 필드만 변경)."""
+    updated = review.update(review_id, body.rating, body.content, body.tags)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="리뷰를 찾을 수 없습니다")
+    return {"success": True, "review": updated}
+
+
+@app.delete("/api/reviews/{review_id}")
+def delete_review(review_id: int):
+    """리뷰 삭제."""
+    if not review.delete(review_id):
+        raise HTTPException(status_code=404, detail="리뷰를 찾을 수 없습니다")
+    return {"success": True, "reviewId": review_id}
+# ─────────────────────────────────────────────
+# 공지사항 · 문의 (WF16, WF15)
+# ─────────────────────────────────────────────
+
+@app.get("/api/notices")
+def get_notices():
+    """공지 목록. 중요 공지가 위로, NEW 배지 포함."""
+    notices = store.load_notices()
+    return {
+        "count": len(notices),
+        "unreadCount": sum(1 for n in notices if n["isNew"]),
+        "notices": notices,
+    }
+
+
+@app.post("/api/inquiries")
+def create_inquiry(body: InquiryCreate):
+    """문의 접수 (WF15 문의하기)."""
+    created = store.create_inquiry(body.name, body.content)
+    return {
+        "success": True,
+        "inquiryId": created["inquiryId"],
+        "message": "문의가 접수되었습니다. 영업일 기준 1~2일 내 답변드립니다.",
+    }
 @app.get("/")
 def health():
     return {"status": "ok", "service": "zari API v3"}

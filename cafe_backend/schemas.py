@@ -152,3 +152,25 @@ class OwnerSeatUpdateRequest(BaseModel):
     """
     cafeId: int
     crowdLevel: CrowdLevel
+# ─────────────────────────────────────────────
+# 리뷰 (WF19)
+# ─────────────────────────────────────────────
+
+class ReviewCreate(BaseModel):
+    """리뷰 작성 body."""
+    cafeId: int
+    rating: int = Field(ge=1, le=5)                   # 별점 1~5
+    content: str = Field(default="", max_length=200)  # 한줄평
+    tags: list[str] = []                              # 해시태그 (# 제외한 텍스트)
+
+
+class ReviewUpdate(BaseModel):
+    """리뷰 수정 body. 보낸 필드만 바뀐다."""
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+    content: Optional[str] = Field(default=None, max_length=200)
+    tags: Optional[list[str]] = None
+
+class InquiryCreate(BaseModel):
+    """문의하기 body (WF15)."""
+    name: str = Field(min_length=1, max_length=30)       # 신청자 이름
+    content: str = Field(min_length=1, max_length=1000)  # 문의 내용

@@ -12,6 +12,8 @@ BASE = Path(__file__).parent
 CAFES_CSV = BASE / "cafes.csv"
 REPORTS_CSV = BASE / "reports.csv"
 FAVORITES_CSV = BASE / "favorites.csv"
+NOTICES_CSV = BASE / "notices.csv"
+INQUIRIES_CSV = BASE / "inquiries.csv"
 
 KST = timezone(timedelta(hours=9))
 _write_lock = threading.Lock()
@@ -143,3 +145,58 @@ def remove_favorite(cafe_id: int, user_id: int = DEMO_USER_ID) -> bool:
             w.writeheader()
             w.writerows(rows)
         return True
+
+# ─────────────────────────────────────────────
+# 공지사항 · 문의 (WF16, WF15)
+# ─────────────────────────────────────────────
+
+NOTICE_NEW_HOURS = 24          # 이 시간 이내면 NEW 배지
+INQUIRY_FIELDS = ["inquiryId", "userId", "name", "content", "createdAt"]
+
+
+def load_notices() -> list[dict]:
+    """공지 목록. 중요 공지가 위로, 그다음 최신순."""
+    if not NOTICES_CSV.exists():
+        return []
+    with open(NOTICES_CSV, encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+
+    now = datetime.now(KST)
+    result = []
+    for r in rows:
+        created = datetime.fromisoformat(r["createdAt"])
+        result.append({
+            "noticeId": int(r["noticeId"]),
+            "title": r["title"],
+            "content": r["content"],
+            "isImportant": r["isImportant"] == "true",
+            "isNew": (now - created) <= timedelta(hours=NOTICE_NEW_HOURS),
+            "createdAt": r["createdAt"],
+        })
+    # 중요 공지 먼저, 같은 등급이면 최신순
+    result.sort(key=lambda n: (n["isImportant"], n["createdAt"]), reverse=True)
+    return result
+
+
+def create_inquiry(name: str, content: str, user_id: int = DEMO_USER_ID) -> dict:
+    """문의 접수 (append)."""
+    with _write_lock:
+        rows = []
+        if INQUIRIES_CSV.exists():
+            with open(INQUIRIES_CSV, encoding="utf-8-sig") as f:
+                rows = list(csv.DictReader(f))
+        next_id = max((int(r["inquiryId"]) for r in rows), default=0) + 1
+        row = {
+            "inquiryId": next_id,
+            "userId": user_id,
+            "name": name,
+            "content": content,
+            "createdAt": datetime.now(KST).isoformat(),
+        }
+        exists = INQUIRIES_CSV.exists()
+        with open(INQUIRIES_CSV, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=INQUIRY_FIELDS)
+            if not exists:
+                w.writeheader()
+            w.writerow(row)
+        return row
