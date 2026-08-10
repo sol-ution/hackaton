@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import store
 import forecast as forecast_mod
+import stamp
 from crowd_rule import decide_crowd
 from schemas import (
     Cafe, CrowdReportRequest, CrowdReportResponse, OwnerSeatUpdateRequest,
@@ -202,7 +203,7 @@ def get_cafe_forecast(cafe_id: int, minutes: int = 12):
     return forecast_mod.forecast(cafe_id, minutes, datetime.now(KST))
 
 
-@app.post("/api/reports", response_model=CrowdReportResponse)
+@app.post("/api/reports")
 def create_report(body: CrowdReportRequest):
     # 카페 찾기
     cafe = next((r for r in store.load_cafes() if int(r["id"]) == body.cafeId), None)
@@ -230,7 +231,15 @@ def create_report(body: CrowdReportRequest):
         "nickname": "나",
         "reportedAt": datetime.now(KST).isoformat(),
     })
-    return CrowdReportResponse(success=True, distanceMeters=round(dist, 1))
+    # 스탬프 적립 시도 (GPS 반경 안에서 제보한 경우만 적립)
+    gps_ok = dist <= GPS_RADIUS_M
+    stamp_result = stamp.try_earn(body.cafeId, gps_ok, cafe)
+
+    return {
+        "success": True,
+        "distanceMeters": round(dist, 1),
+        "stamp": stamp_result,
+    }
 
 
 @app.post("/api/owner/seats")
@@ -241,6 +250,96 @@ def update_owner_seats(body: OwnerSeatUpdateRequest):
         raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
     return {"success": True, "cafeId": body.cafeId, "crowdLevel": int(body.crowdLevel)}
 
+# ─────────────────────────────────────────────
+# 스탬프 · 쿠폰 (WF13 마이페이지)
+# ─────────────────────────────────────────────
+
+@app.get("/api/me/stamps")
+def get_my_stamps():
+    """매장별 스탬프 적립 현황."""
+    cafes = {int(c["id"]): c for c in store.load_cafes()}
+    result = []
+    for cafe_id, cafe in cafes.items():
+        if not cafe.get("stampGoal"):
+            continue
+        count = stamp.stamp_count(cafe_id)
+        goal = int(cafe["stampGoal"])
+        result.append({
+            "cafeId": cafe_id,
+            "cafeName": cafe["name"],
+            "reward": cafe.get("stampReward", ""),
+            "count": count,
+            "goal": goal,
+            "remaining": max(0, goal - count),
+        })
+    return {
+        "earnedToday": stamp.earned_today(),
+        "dailyLimit": stamp.DAILY_STAMP_LIMIT,
+        "cards": result,
+    }
+
+
+@app.get("/api/me/coupons")
+def get_my_coupons():
+    """내 쿠폰 목록 (사용 가능 / 사용 완료)."""
+    cafes = {int(c["id"]): c["name"] for c in store.load_cafes()}
+    result = []
+    for c in stamp.load_coupons():
+        result.append({
+            "code": c["code"],
+            "cafeId": int(c["cafeId"]),
+            "cafeName": cafes.get(int(c["cafeId"]), ""),
+            "reward": c["reward"],
+            "issuedAt": c["issuedAt"],
+            "expiresAt": c["expiresAt"],
+            "used": bool(c["usedAt"]),
+            "usedAt": c["usedAt"] or None,
+        })
+    available = [c for c in result if not c["used"]]
+    return {"availableCount": len(available), "coupons": result}
+
+
+@app.post("/api/coupons/{code}/use")
+def use_coupon(code: str, pin: str):
+    """쿠폰 사용 처리. code는 '#' 때문에 프론트에서 인코딩 필요 (%23A3F9)."""
+    coupon = next((c for c in stamp.load_coupons() if c["code"] == code), None)
+    if coupon is None:
+        raise HTTPException(status_code=404, detail="쿠폰을 찾을 수 없습니다")
+
+    cafe = next((r for r in store.load_cafes()
+                 if int(r["id"]) == int(coupon["cafeId"])), None)
+    if cafe is None:
+        raise HTTPException(status_code=404, detail="매장을 찾을 수 없습니다")
+
+    result = stamp.use_coupon(code, pin, cafe)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+
+@app.get("/api/me/reports")
+def get_my_reports():
+    """내 제보 내역 (적립 여부 포함) - WF18."""
+    cafes = {int(c["id"]): c["name"] for c in store.load_cafes()}
+    stamps = stamp.load_stamps()
+
+    result = []
+    for s in sorted(stamps, key=lambda x: x["reportedAt"], reverse=True):
+        result.append({
+            "cafeId": int(s["cafeId"]),
+            "cafeName": cafes.get(int(s["cafeId"]), ""),
+            "reportedAt": s["reportedAt"],
+            "earned": s["earned"] == "true",
+            "reason": s["reason"],
+        })
+
+    earned = sum(1 for r in result if r["earned"])
+    return {
+        "totalCount": len(result),
+        "earnedCount": earned,
+        "notEarnedCount": len(result) - earned,
+        "reports": result,
+    }
 
 @app.get("/")
 def health():
