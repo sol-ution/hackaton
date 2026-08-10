@@ -3,6 +3,8 @@
 
 별점(1~5) + 한줄평 + 해시태그. 작성/수정/삭제 가능.
 제보와 달리 리뷰는 시점 기록이 아니라 의견이라 수정이 허용된다.
+
+데모라 유저는 1명 고정(userId=1).
 """
 
 import csv
@@ -26,8 +28,11 @@ REVIEW_FIELDS = ["reviewId", "userId", "cafeId", "rating",
 def _read() -> list[dict]:
     if not REVIEWS_CSV.exists():
         return []
-    with open(REVIEWS_CSV, encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
+    try:
+        with open(REVIEWS_CSV, encoding="utf-8-sig") as f:
+            return list(csv.DictReader(f))
+    except Exception:
+        return []
 
 
 def _write(rows: list[dict]) -> None:
@@ -37,31 +42,46 @@ def _write(rows: list[dict]) -> None:
         w.writerows(rows)
 
 
-def _to_dict(r: dict) -> dict:
-    """CSV 한 행 → API 응답 형태."""
-    return {
-        "reviewId": int(r["reviewId"]),
-        "cafeId": int(r["cafeId"]),
-        "rating": int(r["rating"]),
-        "content": r["content"],
-        "tags": r["tags"].split("|") if r["tags"] else [],
-        "createdAt": r["createdAt"],
-        "updatedAt": r["updatedAt"] or None,
-    }
+def _to_dict(r: dict) -> dict | None:
+    """CSV 한 행 → API 응답 형태. 깨진 행이면 None."""
+    try:
+        return {
+            "reviewId": int(r["reviewId"]),
+            "cafeId": int(r["cafeId"]),
+            "rating": int(r["rating"]),
+            "content": r["content"],
+            "tags": r["tags"].split("|") if r["tags"] else [],
+            "createdAt": r["createdAt"],
+            "updatedAt": r["updatedAt"] or None,
+        }
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 def load_reviews(user_id: int = DEMO_USER_ID) -> list[dict]:
-    """내 리뷰 (최신순)."""
-    rows = [r for r in _read() if int(r["userId"]) == user_id]
-    rows.sort(key=lambda r: r["createdAt"], reverse=True)
-    return [_to_dict(r) for r in rows]
+    """내 리뷰 (최신순). 깨진 행은 건너뛴다."""
+    rows = []
+    for r in _read():
+        try:
+            if int(r["userId"]) == user_id:
+                rows.append(r)
+        except (ValueError, KeyError, TypeError):
+            continue
+    rows.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+    return [d for d in (_to_dict(r) for r in rows) if d is not None]
 
 
 def reviews_for_cafe(cafe_id: int) -> list[dict]:
-    """특정 카페의 리뷰 전체 (최신순)."""
-    rows = [r for r in _read() if int(r["cafeId"]) == cafe_id]
-    rows.sort(key=lambda r: r["createdAt"], reverse=True)
-    return [_to_dict(r) for r in rows]
+    """특정 카페의 리뷰 전체 (최신순). 깨진 행은 건너뛴다."""
+    rows = []
+    for r in _read():
+        try:
+            if int(r["cafeId"]) == cafe_id:
+                rows.append(r)
+        except (ValueError, KeyError, TypeError):
+            continue
+    rows.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+    return [d for d in (_to_dict(r) for r in rows) if d is not None]
 
 
 def create(cafe_id: int, rating: int, content: str, tags: list[str],
@@ -69,7 +89,13 @@ def create(cafe_id: int, rating: int, content: str, tags: list[str],
     """리뷰 작성."""
     with _lock:
         rows = _read()
-        next_id = max((int(r["reviewId"]) for r in rows), default=0) + 1
+        ids = []
+        for r in rows:
+            try:
+                ids.append(int(r["reviewId"]))
+            except (ValueError, KeyError, TypeError):
+                continue
+        next_id = max(ids, default=0) + 1
         now = datetime.now(KST).isoformat()
         row = {
             "reviewId": next_id,

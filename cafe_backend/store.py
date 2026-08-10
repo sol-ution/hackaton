@@ -4,6 +4,7 @@ CSV 데이터 로딩 + 제보 저장.
 """
 
 import csv
+import logging
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,6 +18,23 @@ INQUIRIES_CSV = BASE / "inquiries.csv"
 
 KST = timezone(timedelta(hours=9))
 _write_lock = threading.Lock()
+log = logging.getLogger("zari")
+
+
+def safe_dt(value) -> datetime | None:
+    """ISO 문자열을 datetime으로. 깨져 있으면 None."""
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def safe_int(value, default=None):
+    """문자열을 int로. 실패하면 default."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
 
 REPORT_FIELDS = [
     "cafeId", "crowdLevel", "quietScore", "restroomScore", "outletLevel",
@@ -24,25 +42,54 @@ REPORT_FIELDS = [
 ]
 
 
+def _safe_read(path: Path, label: str) -> list[dict]:
+    """
+    CSV를 안전하게 읽는다.
+    파일이 없거나 인코딩이 깨져도 서버가 죽지 않고 빈 목록을 돌려준다.
+    (발표 중 CSV 하나 때문에 전체 API가 500이 되는 걸 막기 위함)
+    """
+    if not path.exists():
+        log.warning("%s 파일이 없습니다: %s", label, path)
+        return []
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return list(csv.DictReader(f))
+    except UnicodeDecodeError:
+        # 엑셀로 저장하면 cp949로 바뀌는 경우가 있어 한 번 더 시도
+        try:
+            with open(path, encoding="cp949") as f:
+                log.warning("%s 를 cp949로 읽었습니다", label)
+                return list(csv.DictReader(f))
+        except Exception as e:
+            log.error("%s 읽기 실패: %s", label, e)
+            return []
+    except Exception as e:
+        log.error("%s 읽기 실패: %s", label, e)
+        return []
+
+
 def load_cafes() -> list[dict]:
     """cafes.csv 전체를 dict 리스트로."""
-    with open(CAFES_CSV, encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
+    return _safe_read(CAFES_CSV, "cafes.csv")
 
 
 def load_reports() -> list[dict]:
     """reports.csv 전체를 dict 리스트로."""
-    if not REPORTS_CSV.exists():
-        return []
-    with open(REPORTS_CSV, encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
+    return _safe_read(REPORTS_CSV, "reports.csv")
 
 
 def reports_for(cafe_id: int, reports: list[dict] | None = None) -> list[dict]:
-    """특정 카페의 제보만 필터."""
+    """특정 카페의 제보만 필터. 깨진 행은 건너뛴다."""
     if reports is None:
         reports = load_reports()
-    return [r for r in reports if int(r["cafeId"]) == cafe_id]
+    result = []
+    for r in reports:
+        try:
+            if int(r["cafeId"]) == cafe_id:
+                result.append(r)
+        except (ValueError, KeyError, TypeError):
+            continue          # cafeId가 숫자가 아니면 무시
+    return result
 
 
 def append_report(row: dict) -> None:
@@ -85,6 +132,7 @@ def update_owner_seat(cafe_id: int, crowd_level: int) -> bool:
             writer.writerows(rows)
         return True
 
+
 # ─────────────────────────────────────────────
 # 즐겨찾기 (WF13 마이페이지)
 # ─────────────────────────────────────────────
@@ -94,27 +142,32 @@ FAVORITE_FIELDS = ["userId", "cafeId", "addedAt"]
 
 
 def load_favorites(user_id: int = DEMO_USER_ID) -> list[dict]:
-    """내 즐겨찾기 목록 (최근 추가순)."""
-    if not FAVORITES_CSV.exists():
-        return []
-    with open(FAVORITES_CSV, encoding="utf-8-sig") as f:
-        rows = [r for r in csv.DictReader(f) if int(r["userId"]) == user_id]
-    rows.sort(key=lambda r: r["addedAt"], reverse=True)
+    """내 즐겨찾기 목록 (최근 추가순). 깨진 행은 건너뛴다."""
+    rows = []
+    for r in _safe_read(FAVORITES_CSV, "favorites.csv"):
+        try:
+            if int(r["userId"]) == user_id and int(r["cafeId"]) >= 0:
+                rows.append(r)
+        except (ValueError, KeyError, TypeError):
+            continue
+    rows.sort(key=lambda r: r.get("addedAt", ""), reverse=True)
     return rows
 
 
 def is_favorite(cafe_id: int, user_id: int = DEMO_USER_ID) -> bool:
-    return any(int(r["cafeId"]) == cafe_id for r in load_favorites(user_id))
+    return any(safe_int(r.get("cafeId")) == cafe_id for r in load_favorites(user_id))
 
 
 def add_favorite(cafe_id: int, user_id: int = DEMO_USER_ID) -> bool:
     """즐겨찾기 추가. 이미 있으면 False."""
     with _write_lock:
-        rows = []
-        if FAVORITES_CSV.exists():
-            with open(FAVORITES_CSV, encoding="utf-8-sig") as f:
-                rows = list(csv.DictReader(f))
-        if any(int(r["userId"]) == user_id and int(r["cafeId"]) == cafe_id for r in rows):
+        rows = _safe_read(FAVORITES_CSV, "favorites.csv")
+        # 깨진 행은 여기서 정리하고 다시 쓴다
+        rows = [r for r in rows
+                if safe_int(r.get("userId")) is not None
+                and safe_int(r.get("cafeId")) is not None]
+        if any(safe_int(r.get("userId")) == user_id
+               and safe_int(r.get("cafeId")) == cafe_id for r in rows):
             return False
         rows.append({
             "userId": user_id,
@@ -133,11 +186,11 @@ def remove_favorite(cafe_id: int, user_id: int = DEMO_USER_ID) -> bool:
     with _write_lock:
         if not FAVORITES_CSV.exists():
             return False
-        with open(FAVORITES_CSV, encoding="utf-8-sig") as f:
-            rows = list(csv.DictReader(f))
+        rows = _safe_read(FAVORITES_CSV, "favorites.csv")
         before = len(rows)
         rows = [r for r in rows
-                if not (int(r["userId"]) == user_id and int(r["cafeId"]) == cafe_id)]
+                if not (safe_int(r.get("userId")) == user_id
+                        and safe_int(r.get("cafeId")) == cafe_id)]
         if len(rows) == before:
             return False
         with open(FAVORITES_CSV, "w", newline="", encoding="utf-8") as f:
@@ -145,6 +198,7 @@ def remove_favorite(cafe_id: int, user_id: int = DEMO_USER_ID) -> bool:
             w.writeheader()
             w.writerows(rows)
         return True
+
 
 # ─────────────────────────────────────────────
 # 공지사항 · 문의 (WF16, WF15)
@@ -156,17 +210,16 @@ INQUIRY_FIELDS = ["inquiryId", "userId", "name", "content", "createdAt"]
 
 def load_notices() -> list[dict]:
     """공지 목록. 중요 공지가 위로, 그다음 최신순."""
-    if not NOTICES_CSV.exists():
-        return []
-    with open(NOTICES_CSV, encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
+    rows = _safe_read(NOTICES_CSV, "notices.csv")
 
     now = datetime.now(KST)
     result = []
     for r in rows:
-        created = datetime.fromisoformat(r["createdAt"])
+        created = safe_dt(r.get("createdAt"))
+        if created is None:
+            continue
         result.append({
-            "noticeId": int(r["noticeId"]),
+            "noticeId": safe_int(r.get("noticeId"), 0),
             "title": r["title"],
             "content": r["content"],
             "isImportant": r["isImportant"] == "true",
@@ -200,6 +253,8 @@ def create_inquiry(name: str, content: str, user_id: int = DEMO_USER_ID) -> dict
                 w.writeheader()
             w.writerow(row)
         return row
+
+
 # ─────────────────────────────────────────────
 # 제보 답글 (신뢰도 투표)
 # ─────────────────────────────────────────────
@@ -210,12 +265,9 @@ REPLY_FIELDS = ["replyId", "reportIndex", "cafeId", "userId",
 
 
 def load_replies(cafe_id: int | None = None) -> list[dict]:
-    if not REPLIES_CSV.exists():
-        return []
-    with open(REPLIES_CSV, encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
+    rows = _safe_read(REPLIES_CSV, "replies.csv")
     if cafe_id is not None:
-        rows = [r for r in rows if int(r["cafeId"]) == cafe_id]
+        rows = [r for r in rows if safe_int(r.get("cafeId")) == cafe_id]
     return rows
 
 
@@ -223,14 +275,14 @@ def replies_for_report(cafe_id: int, report_index: int) -> list[dict]:
     """특정 제보에 달린 답글."""
     return [
         {
-            "replyId": int(r["replyId"]),
+            "replyId": safe_int(r.get("replyId"), 0),
             "nickname": r["nickname"],
             "agree": r["agree"] == "true",
             "content": r["content"],
             "createdAt": r["createdAt"],
         }
         for r in load_replies(cafe_id)
-        if int(r["reportIndex"]) == report_index
+        if safe_int(r.get("reportIndex")) == report_index
     ]
 
 
@@ -239,7 +291,7 @@ def add_reply(cafe_id: int, report_index: int, agree: bool,
     """제보에 답글(신뢰도 투표) 달기."""
     with _write_lock:
         rows = load_replies()
-        next_id = max((int(r["replyId"]) for r in rows), default=0) + 1
+        next_id = max((safe_int(r.get("replyId"), 0) for r in rows), default=0) + 1
         row = {
             "replyId": next_id,
             "reportIndex": report_index,

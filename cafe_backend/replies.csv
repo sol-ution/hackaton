@@ -1,2 +1,3 @@
 replyId,reportIndex,cafeId,userId,nickname,agree,content,createdAt
 1,0,4,2,닉네임 E,true,저도 방금 갔는데 맞아요,2026-08-10T15:13:47.743088+09:00
+2,0,4,1,나,true,점검용,2026-08-10T15:43:42.441516+09:00

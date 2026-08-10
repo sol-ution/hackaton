@@ -11,6 +11,7 @@
   POST /api/owner/seats             사장님 좌석 갱신 (crowdLevel)
 """
 
+import logging
 import math
 from datetime import datetime, timedelta, timezone
 
@@ -30,6 +31,7 @@ from schemas import (
 )
 
 KST = timezone(timedelta(hours=9))
+log = logging.getLogger("zari")
 
 # ── 설정 (계약서 §2, 프론트 제안값 그대로) ──
 GPS_RADIUS_M = 150          # 제보 허용 반경 (100m 제안이나 발표장 GPS 여유로 150)
@@ -40,13 +42,13 @@ DEMO_SKIP_GPS = True        # 발표 당일 True(거리검증 통과), 실서비
 # 하나씩 적지 않고 사설 IP 대역 전체를 정규식으로 허용한다.
 # 발표 당일 IP가 뭐로 잡히든 CORS를 다시 손댈 필요가 없다.
 CORS_ORIGIN_REGEX = (
-    r"(http://(localhost|127\.0\.0\.1"
+    r"http://(localhost|127\.0\.0\.1"
     r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
     r"|192\.168\.\d{1,3}\.\d{1,3}"
     r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})"
-    r":\d+)"
-    r"|(https://zari-frontend[a-z0-9-]*\.vercel\.app)"
+    r":\d+"
 )
+
 app = FastAPI(title="zari API", version="3.0")
 
 app.add_middleware(
@@ -70,17 +72,28 @@ def haversine_m(lat1, lng1, lat2, lng2) -> float:
 
 
 def build_cafe(row: dict, reports: list[dict], now: datetime) -> Cafe:
-    """cafes.csv 한 행 + 제보로 Cafe 응답 객체 생성."""
+    """
+    cafes.csv 한 행 + 제보로 Cafe 응답 객체 생성.
+    행이 깨져 있으면 예외를 던지므로 호출부에서 걸러야 한다 (build_cafe_safe 사용).
+    """
     my_reports = store.reports_for(int(row["id"]), reports)
     decided = decide_crowd(row, my_reports, now)
 
     def i(v):  # int or None
-        return int(v) if v not in ("", None) else None
+        try:
+            return int(v) if v not in ("", None) else None
+        except (ValueError, TypeError):
+            return None
 
-    # 최근 24시간 제보 수 (동적 계산)
+    # 최근 24시간 제보 수. reportedAt이 깨진 행은 세지 않는다.
     day_ago = now - timedelta(hours=24)
-    rc24 = sum(1 for r in my_reports
-               if datetime.fromisoformat(r["reportedAt"]) >= day_ago)
+    rc24 = 0
+    for r in my_reports:
+        try:
+            if datetime.fromisoformat(r["reportedAt"]) >= day_ago:
+                rc24 += 1
+        except (ValueError, KeyError, TypeError):
+            continue
 
     return Cafe(
         id=int(row["id"]),
@@ -110,13 +123,25 @@ def build_cafe(row: dict, reports: list[dict], now: datetime) -> Cafe:
     )
 
 
+def build_cafe_safe(row: dict, reports: list[dict], now: datetime) -> Cafe | None:
+    """
+    build_cafe를 감싸서, 한 행이 깨져도 전체 응답이 죽지 않게 한다.
+    깨진 행은 로그만 남기고 목록에서 제외된다.
+    """
+    try:
+        return build_cafe(row, reports, now)
+    except Exception as e:
+        log.warning("카페 행 스킵 (id=%s): %s", row.get("id"), e)
+        return None
+
 
 @app.get("/api/cafes", response_model=list[Cafe])
 def get_cafes():
     now = datetime.now(KST)
     cafes = store.load_cafes()
     reports = store.load_reports()
-    return [build_cafe(row, reports, now) for row in cafes]
+    built = [build_cafe_safe(row, reports, now) for row in cafes]
+    return [c for c in built if c is not None]
 
 
 @app.get("/api/cafes/search")
@@ -128,8 +153,10 @@ def search_cafes(q: str):
     # 이름 또는 주소에 검색어가 들어간 카페만
     results = []
     for row in store.load_cafes():
-        if keyword in row["name"].lower() or keyword in row["address"].lower():
-            results.append(build_cafe(row, reports, now))
+        if keyword in row.get("name", "").lower() or keyword in row.get("address", "").lower():
+            cafe = build_cafe_safe(row, reports, now)
+            if cafe is not None:
+                results.append(cafe)
     return results
 
 
@@ -152,29 +179,39 @@ def get_cafe_reports(cafe_id: int):
     # 프론트가 쓸 모양으로 정리 (WF05 화면: 혼잡도/시각/후기/인원/태그)
     result = []
     for idx, r in enumerate(my_reports):
-        result.append({
-            "reportIndex": idx,
-            "replies": store.replies_for_report(cafe_id, idx),
-            "cafeId": int(r["cafeId"]),
-            "crowdLevel": int(r["crowdLevel"]),
-            "quietScore": int(r["quietScore"]),
-            "restroomScore": int(r["restroomScore"]),
-            "outletLevel": r["outletLevel"],
-            "smokingRoom": r["smokingRoom"],
-            "visitCount": r["visitCount"],
-            "note": r["note"],
-            "nickname": r.get("nickname", ""),
-            "reportedAt": r["reportedAt"],
-        })
+        try:
+            result.append({
+                "reportIndex": idx,
+                "replies": store.replies_for_report(cafe_id, idx),
+                "cafeId": int(r["cafeId"]),
+                "crowdLevel": int(r["crowdLevel"]),
+                "quietScore": int(r["quietScore"]),
+                "restroomScore": int(r["restroomScore"]),
+                "outletLevel": r["outletLevel"],
+                "smokingRoom": r["smokingRoom"],
+                "visitCount": r["visitCount"],
+                "note": r["note"],
+                "nickname": r.get("nickname", ""),
+                "reportedAt": r["reportedAt"],
+            })
+        except (ValueError, KeyError, TypeError) as e:
+            log.warning("제보 행 스킵 (cafe=%s, idx=%s): %s", cafe_id, idx, e)
+            continue
 
     # 오늘(자정 이후) 제보 수 — WF05 상단 "오늘 제보 12건"
     now = datetime.now(KST)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_count = sum(1 for r in result
-                      if datetime.fromisoformat(r["reportedAt"]) >= midnight)
+    today_count = 0
+    for r in result:
+        try:
+            if datetime.fromisoformat(r["reportedAt"]) >= midnight:
+                today_count += 1
+        except (ValueError, TypeError):
+            continue
 
     return {
         "cafeId": cafe_id,
+        # WF05 상단 요약: "오늘 제보 12건 / 마지막 제보 3분 전"
         "todayCount": today_count,
         "lastReportedAt": result[0]["reportedAt"] if result else None,
         "totalCount": len(result),
@@ -200,7 +237,10 @@ def get_cafe_history(cafe_id: int, day: str = "wed"):
 
 @app.get("/api/cafes/{cafe_id}/forecast")
 def get_cafe_forecast(cafe_id: int, minutes: int = 12):
-    """WF04 도착 시점 예측. minutes는 프론트가 도보 시간으로 계산해서 보냄."""
+    """
+    WF04 도착 시점 예측. minutes 후 도착했을 때의 혼잡도.
+    minutes는 프론트가 도보 시간으로 계산해서 보낸다.
+    """
     cafe = next((r for r in store.load_cafes() if int(r["id"]) == cafe_id), None)
     if cafe is None:
         raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
@@ -235,6 +275,7 @@ def create_report(body: CrowdReportRequest):
         "smokingRoom": body.smokingRoom.value,
         "visitCount": body.visitCount.value,
         "note": body.note,
+        # 로그인이 스텁이라 새 제보는 "나"로 고정 (데모에서 방금 넣은 제보가 눈에 띄게)
         "nickname": "나",
         "reportedAt": datetime.now(KST).isoformat(),
     })
@@ -257,6 +298,7 @@ def update_owner_seats(body: OwnerSeatUpdateRequest):
         raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
     return {"success": True, "cafeId": body.cafeId, "crowdLevel": int(body.crowdLevel)}
 
+
 # ─────────────────────────────────────────────
 # 스탬프 · 쿠폰 (WF13 마이페이지)
 # ─────────────────────────────────────────────
@@ -268,7 +310,7 @@ def get_my_stamps():
     result = []
     for cafe_id, cafe in cafes.items():
         if not cafe.get("stampGoal"):
-            continue
+            continue                       # 스탬프 운영 안 하는 매장은 제외
         count = stamp.stamp_count(cafe_id)
         goal = int(cafe["stampGoal"])
         result.append({
@@ -308,7 +350,10 @@ def get_my_coupons():
 
 @app.post("/api/coupons/{code}/use")
 def use_coupon(code: str, pin: str):
-    """쿠폰 사용 처리. code는 '#' 때문에 프론트에서 인코딩 필요 (%23A3F9)."""
+    """
+    쿠폰 사용 처리. 유저 폰에 PIN 입력창이 뜨고 사장님이 매장 PIN을 입력한다.
+    code는 URL에 '#'이 들어가므로 프론트에서 인코딩 필요 (%23A3F9).
+    """
     coupon = next((c for c in stamp.load_coupons() if c["code"] == code), None)
     if coupon is None:
         raise HTTPException(status_code=404, detail="쿠폰을 찾을 수 없습니다")
@@ -347,6 +392,8 @@ def get_my_reports():
         "notEarnedCount": len(result) - earned,
         "reports": result,
     }
+
+
 # ─────────────────────────────────────────────
 # 즐겨찾기 (WF13 마이페이지)
 # ─────────────────────────────────────────────
@@ -362,8 +409,10 @@ def get_my_favorites():
     for fav in store.load_favorites():
         row = cafes.get(int(fav["cafeId"]))
         if row is None:
+            continue                       # 삭제된 카페는 건너뜀
+        cafe = build_cafe_safe(row, reports, now)
+        if cafe is None:
             continue
-        cafe = build_cafe(row, reports, now)
         result.append({
             "cafe": cafe,
             "addedAt": fav["addedAt"],
@@ -389,6 +438,8 @@ def remove_favorite(cafe_id: int):
         raise HTTPException(status_code=404, detail="즐겨찾기에 없는 카페입니다")
     return {"success": True, "cafeId": cafe_id, "isFavorite": False,
             "message": "즐겨찾기를 해제했습니다"}
+
+
 # ─────────────────────────────────────────────
 # 리뷰 (WF19 내 활동)
 # ─────────────────────────────────────────────
@@ -436,6 +487,8 @@ def delete_review(review_id: int):
     if not review.delete(review_id):
         raise HTTPException(status_code=404, detail="리뷰를 찾을 수 없습니다")
     return {"success": True, "reviewId": review_id}
+
+
 # ─────────────────────────────────────────────
 # 공지사항 · 문의 (WF16, WF15)
 # ─────────────────────────────────────────────
@@ -460,6 +513,8 @@ def create_inquiry(body: InquiryCreate):
         "inquiryId": created["inquiryId"],
         "message": "문의가 접수되었습니다. 영업일 기준 1~2일 내 답변드립니다.",
     }
+
+
 # ─────────────────────────────────────────────
 # 사장님 - 대시보드 · 매장정보 (WF11, WF12)
 # ─────────────────────────────────────────────
@@ -572,6 +627,8 @@ def add_reply(cafe_id: int, report_index: int, body: ReplyCreate):
         raise HTTPException(status_code=404, detail="제보를 찾을 수 없습니다")
     created = store.add_reply(cafe_id, report_index, body.agree, body.content)
     return {"success": True, "replyId": created["replyId"]}
+
+
 @app.get("/")
 def health():
     return {"status": "ok", "service": "zari API v3"}

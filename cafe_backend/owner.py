@@ -48,15 +48,18 @@ def dashboard(cafe_id: int) -> dict | None:
     now = datetime.now(KST)
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # 오늘 제보 수
     my_reports = store.reports_for(cafe_id)
     today_reports = [r for r in my_reports
-                     if datetime.fromisoformat(r["reportedAt"]) >= midnight]
+                     if (store.safe_dt(r.get("reportedAt")) or midnight - timedelta(days=1)) >= midnight]
 
     # 손님 제보와 내 등록값 비교 (최근 5건)
-    owner_level = int(cafe["crowdLevel"]) if cafe["crowdLevel"] else None
+    owner_level = store.safe_int(cafe.get("crowdLevel"))
     comparisons = []
-    for r in sorted(my_reports, key=lambda x: x["reportedAt"], reverse=True)[:5]:
-        lvl = int(r["crowdLevel"])
+    for r in sorted(my_reports, key=lambda x: x.get("reportedAt", ""), reverse=True)[:5]:
+        lvl = store.safe_int(r.get("crowdLevel"))
+        if lvl is None:
+            continue
         if owner_level is None:
             verdict = "등록값 없음"
         elif lvl == owner_level:
@@ -71,8 +74,9 @@ def dashboard(cafe_id: int) -> dict | None:
             "reportedAt": r["reportedAt"],
         })
 
-    updated = datetime.fromisoformat(cafe["updatedAt"])
-    mins_ago = int((now - updated).total_seconds() // 60)
+    # 마지막 갱신 이후 경과
+    updated = store.safe_dt(cafe.get("updatedAt"))
+    mins_ago = int((now - updated).total_seconds() // 60) if updated else 0
 
     return {
         "cafeId": cafe_id,
@@ -105,6 +109,11 @@ def increment_counter(cafe_id: int, field: str) -> bool:
 # ─────────────────────────────────────────────
 # 매장 정보 관리 (WF12)
 # ─────────────────────────────────────────────
+
+INFO_FIELDS = ["weekdayHours", "weekendHours", "holiday", "structureNote",
+               "hasWifi", "noTimeLimit", "hasParking", "hasSmokingRoom",
+               "totalSeats", "seatsSolo", "seatsPair", "seatsGroup"]
+
 
 def get_store_info(cafe_id: int) -> dict | None:
     cafe = _find(cafe_id)
@@ -258,18 +267,19 @@ def coupon_management(cafe_id: int) -> dict:
     pending.sort(key=lambda x: x["issuedAt"], reverse=True)
     done.sort(key=lambda x: x["usedAt"], reverse=True)
 
+    # 이번 달 통계
     issued_this_month = sum(1 for c in all_coupons
-                            if datetime.fromisoformat(c["issuedAt"]) >= month_start)
+                            if (store.safe_dt(c.get("issuedAt")) or month_start - timedelta(days=1)) >= month_start)
     used_this_month = sum(1 for c in all_coupons
-                          if c["usedAt"]
-                          and datetime.fromisoformat(c["usedAt"]) >= month_start)
+                          if c.get("usedAt")
+                          and (store.safe_dt(c["usedAt"]) or month_start - timedelta(days=1)) >= month_start)
     stamps_this_month = 0
     if stamp.STAMPS_CSV.exists():
         with open(stamp.STAMPS_CSV, encoding="utf-8-sig") as f:
             stamps_this_month = sum(
                 1 for s in csv.DictReader(f)
-                if int(s["cafeId"]) == cafe_id and s["earned"] in ("true", "used")
-                and datetime.fromisoformat(s["reportedAt"]) >= month_start
+                if store.safe_int(s.get("cafeId")) == cafe_id and s.get("earned") in ("true", "used")
+                and (store.safe_dt(s.get("reportedAt")) or month_start - timedelta(days=1)) >= month_start
             )
 
     return {

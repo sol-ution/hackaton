@@ -63,11 +63,14 @@ def decide_crowd(
     if now is None:
         now = datetime.now(KST)
 
-    # 이 카페 제보만, 시각 파싱
+    # 이 카페 제보만, 시각 파싱. 깨진 행은 건너뛴다.
     parsed = []
     for r in reports:
-        t = datetime.fromisoformat(r["reportedAt"])
-        parsed.append((t, int(r["crowdLevel"])))
+        try:
+            t = datetime.fromisoformat(r["reportedAt"])
+            parsed.append((t, int(r["crowdLevel"])))
+        except (ValueError, KeyError, TypeError):
+            continue
 
     recent_30m = [lvl for (t, lvl) in parsed if now - t <= REPORT_WINDOW]
     recent_2h = [lvl for (t, lvl) in parsed if now - t <= CONF_WINDOW]
