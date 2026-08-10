@@ -111,6 +111,7 @@ class Cafe(BaseModel):
     seatsSolo: Optional[int] = None
     seatsPair: Optional[int] = None
     seatsGroup: Optional[int] = None
+    isFavorite : bool = False
 
 # ─────────────────────────────────────────────
 # 제보 요청/응답  (POST /reports)

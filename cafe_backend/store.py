@@ -11,6 +11,7 @@ from pathlib import Path
 BASE = Path(__file__).parent
 CAFES_CSV = BASE / "cafes.csv"
 REPORTS_CSV = BASE / "reports.csv"
+FAVORITES_CSV = BASE / "favorites.csv"
 
 KST = timezone(timedelta(hours=9))
 _write_lock = threading.Lock()
@@ -80,4 +81,65 @@ def update_owner_seat(cafe_id: int, crowd_level: int) -> bool:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
+        return True
+
+# ─────────────────────────────────────────────
+# 즐겨찾기 (WF13 마이페이지)
+# ─────────────────────────────────────────────
+
+DEMO_USER_ID = 1
+FAVORITE_FIELDS = ["userId", "cafeId", "addedAt"]
+
+
+def load_favorites(user_id: int = DEMO_USER_ID) -> list[dict]:
+    """내 즐겨찾기 목록 (최근 추가순)."""
+    if not FAVORITES_CSV.exists():
+        return []
+    with open(FAVORITES_CSV, encoding="utf-8-sig") as f:
+        rows = [r for r in csv.DictReader(f) if int(r["userId"]) == user_id]
+    rows.sort(key=lambda r: r["addedAt"], reverse=True)
+    return rows
+
+
+def is_favorite(cafe_id: int, user_id: int = DEMO_USER_ID) -> bool:
+    return any(int(r["cafeId"]) == cafe_id for r in load_favorites(user_id))
+
+
+def add_favorite(cafe_id: int, user_id: int = DEMO_USER_ID) -> bool:
+    """즐겨찾기 추가. 이미 있으면 False."""
+    with _write_lock:
+        rows = []
+        if FAVORITES_CSV.exists():
+            with open(FAVORITES_CSV, encoding="utf-8-sig") as f:
+                rows = list(csv.DictReader(f))
+        if any(int(r["userId"]) == user_id and int(r["cafeId"]) == cafe_id for r in rows):
+            return False
+        rows.append({
+            "userId": user_id,
+            "cafeId": cafe_id,
+            "addedAt": datetime.now(KST).isoformat(),
+        })
+        with open(FAVORITES_CSV, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=FAVORITE_FIELDS)
+            w.writeheader()
+            w.writerows(rows)
+        return True
+
+
+def remove_favorite(cafe_id: int, user_id: int = DEMO_USER_ID) -> bool:
+    """즐겨찾기 해제. 없으면 False."""
+    with _write_lock:
+        if not FAVORITES_CSV.exists():
+            return False
+        with open(FAVORITES_CSV, encoding="utf-8-sig") as f:
+            rows = list(csv.DictReader(f))
+        before = len(rows)
+        rows = [r for r in rows
+                if not (int(r["userId"]) == user_id and int(r["cafeId"]) == cafe_id)]
+        if len(rows) == before:
+            return False
+        with open(FAVORITES_CSV, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=FAVORITE_FIELDS)
+            w.writeheader()
+            w.writerows(rows)
         return True

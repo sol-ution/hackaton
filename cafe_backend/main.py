@@ -102,6 +102,7 @@ def build_cafe(row: dict, reports: list[dict], now: datetime) -> Cafe:
         seatsSolo=i(row.get("seatsSolo")),
         seatsPair=i(row.get("seatsPair")),
         seatsGroup=i(row.get("seatsGroup")),
+        isFavorite=store.is_favorite(int(row["id"])),
     )
 
 
@@ -340,6 +341,48 @@ def get_my_reports():
         "notEarnedCount": len(result) - earned,
         "reports": result,
     }
+# ─────────────────────────────────────────────
+# 즐겨찾기 (WF13 마이페이지)
+# ─────────────────────────────────────────────
+
+@app.get("/api/me/favorites")
+def get_my_favorites():
+    """즐겨찾기한 카페 목록 (혼잡도 포함)."""
+    now = datetime.now(KST)
+    reports = store.load_reports()
+    cafes = {int(c["id"]): c for c in store.load_cafes()}
+
+    result = []
+    for fav in store.load_favorites():
+        row = cafes.get(int(fav["cafeId"]))
+        if row is None:
+            continue
+        cafe = build_cafe(row, reports, now)
+        result.append({
+            "cafe": cafe,
+            "addedAt": fav["addedAt"],
+        })
+    return {"count": len(result), "favorites": result}
+
+
+@app.post("/api/cafes/{cafe_id}/favorite")
+def add_favorite(cafe_id: int):
+    """즐겨찾기 추가 (별 채우기)."""
+    if not any(int(c["id"]) == cafe_id for c in store.load_cafes()):
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    added = store.add_favorite(cafe_id)
+    return {"success": True, "cafeId": cafe_id, "isFavorite": True,
+            "message": "즐겨찾기에 추가했습니다" if added else "이미 즐겨찾기입니다"}
+
+
+@app.delete("/api/cafes/{cafe_id}/favorite")
+def remove_favorite(cafe_id: int):
+    """즐겨찾기 해제 (별 비우기)."""
+    removed = store.remove_favorite(cafe_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="즐겨찾기에 없는 카페입니다")
+    return {"success": True, "cafeId": cafe_id, "isFavorite": False,
+            "message": "즐겨찾기를 해제했습니다"}
 
 @app.get("/")
 def health():
