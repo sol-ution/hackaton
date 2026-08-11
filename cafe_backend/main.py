@@ -42,11 +42,12 @@ DEMO_SKIP_GPS = True        # 발표 당일 True(거리검증 통과), 실서비
 # 하나씩 적지 않고 사설 IP 대역 전체를 정규식으로 허용한다.
 # 발표 당일 IP가 뭐로 잡히든 CORS를 다시 손댈 필요가 없다.
 CORS_ORIGIN_REGEX = (
-    r"http://(localhost|127\.0\.0\.1"
+    r"(http://(localhost|127\.0\.0\.1"
     r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
     r"|192\.168\.\d{1,3}\.\d{1,3}"
     r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})"
-    r":\d+"
+    r":\d+)"
+    r"|(https://zari-frontend[a-z0-9-]*\.vercel\.app)"
 )
 
 app = FastAPI(title="zari API", version="3.0")
