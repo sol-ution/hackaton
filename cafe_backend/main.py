@@ -13,9 +13,14 @@
 
 import logging
 import math
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()  # .env의 카카오 키·JWT 시크릿을 환경변수로
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import store
@@ -23,11 +28,13 @@ import forecast as forecast_mod
 import stamp
 import review
 import owner
+import auth
 from crowd_rule import decide_crowd
 from schemas import (
     Cafe, CrowdReportRequest, CrowdReportResponse, OwnerSeatUpdateRequest,
     ReviewCreate, ReviewUpdate, InquiryCreate,
     StoreInfoUpdate, StampSettingsUpdate, CafeRegistrationRequest, ReplyCreate,
+    KakaoLoginRequest,
 )
 
 KST = timezone(timedelta(hours=9))
@@ -42,12 +49,11 @@ DEMO_SKIP_GPS = True        # 발표 당일 True(거리검증 통과), 실서비
 # 하나씩 적지 않고 사설 IP 대역 전체를 정규식으로 허용한다.
 # 발표 당일 IP가 뭐로 잡히든 CORS를 다시 손댈 필요가 없다.
 CORS_ORIGIN_REGEX = (
-    r"(http://(localhost|127\.0\.0\.1"
+    r"http://(localhost|127\.0\.0\.1"
     r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
     r"|192\.168\.\d{1,3}\.\d{1,3}"
     r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})"
-    r":\d+)"
-    r"|(https://zari-frontend[a-z0-9-]*\.vercel\.app)"
+    r":\d+"
 )
 
 app = FastAPI(title="zari API", version="3.0")
@@ -72,7 +78,7 @@ def haversine_m(lat1, lng1, lat2, lng2) -> float:
     return 2 * R * math.asin(math.sqrt(a))
 
 
-def build_cafe(row: dict, reports: list[dict], now: datetime) -> Cafe:
+def build_cafe(row: dict, reports: list[dict], now: datetime, user_id: int = 1) -> Cafe:
     """
     cafes.csv 한 행 + 제보로 Cafe 응답 객체 생성.
     행이 깨져 있으면 예외를 던지므로 호출부에서 걸러야 한다 (build_cafe_safe 사용).
@@ -120,33 +126,33 @@ def build_cafe(row: dict, reports: list[dict], now: datetime) -> Cafe:
         seatsSolo=i(row.get("seatsSolo")),
         seatsPair=i(row.get("seatsPair")),
         seatsGroup=i(row.get("seatsGroup")),
-        isFavorite=store.is_favorite(int(row["id"])),
+        isFavorite=store.is_favorite(int(row["id"]), user_id),
     )
 
 
-def build_cafe_safe(row: dict, reports: list[dict], now: datetime) -> Cafe | None:
+def build_cafe_safe(row: dict, reports: list[dict], now: datetime, user_id: int = 1) -> Cafe | None:
     """
     build_cafe를 감싸서, 한 행이 깨져도 전체 응답이 죽지 않게 한다.
     깨진 행은 로그만 남기고 목록에서 제외된다.
     """
     try:
-        return build_cafe(row, reports, now)
+        return build_cafe(row, reports, now, user_id)
     except Exception as e:
         log.warning("카페 행 스킵 (id=%s): %s", row.get("id"), e)
         return None
 
 
 @app.get("/api/cafes", response_model=list[Cafe])
-def get_cafes():
+def get_cafes(user_id: int = Depends(auth.optional_user_id)):
     now = datetime.now(KST)
     cafes = store.load_cafes()
     reports = store.load_reports()
-    built = [build_cafe_safe(row, reports, now) for row in cafes]
+    built = [build_cafe_safe(row, reports, now, user_id) for row in cafes]
     return [c for c in built if c is not None]
 
 
 @app.get("/api/cafes/search")
-def search_cafes(q: str):
+def search_cafes(q: str, user_id: int = Depends(auth.optional_user_id)):
     now = datetime.now(KST)
     reports = store.load_reports()
     keyword = q.strip().lower()
@@ -155,19 +161,19 @@ def search_cafes(q: str):
     results = []
     for row in store.load_cafes():
         if keyword in row.get("name", "").lower() or keyword in row.get("address", "").lower():
-            cafe = build_cafe_safe(row, reports, now)
+            cafe = build_cafe_safe(row, reports, now, user_id)
             if cafe is not None:
                 results.append(cafe)
     return results
 
 
 @app.get("/api/cafes/{cafe_id}", response_model=Cafe)
-def get_cafe(cafe_id: int):
+def get_cafe(cafe_id: int, user_id: int = Depends(auth.optional_user_id)):
     now = datetime.now(KST)
     reports = store.load_reports()
     for row in store.load_cafes():
         if int(row["id"]) == cafe_id:
-            return build_cafe(row, reports, now)
+            return build_cafe(row, reports, now, user_id)
     raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
 
 
@@ -252,7 +258,7 @@ def get_cafe_forecast(cafe_id: int, minutes: int = 12):
 
 
 @app.post("/api/reports")
-def create_report(body: CrowdReportRequest):
+def create_report(body: CrowdReportRequest, user_id: int = Depends(auth.optional_user_id)):
     # 카페 찾기
     cafe = next((r for r in store.load_cafes() if int(r["id"]) == body.cafeId), None)
     if cafe is None:
@@ -282,7 +288,7 @@ def create_report(body: CrowdReportRequest):
     })
     # 스탬프 적립 시도 (GPS 반경 안에서 제보한 경우만 적립)
     gps_ok = dist <= GPS_RADIUS_M
-    stamp_result = stamp.try_earn(body.cafeId, gps_ok, cafe)
+    stamp_result = stamp.try_earn(body.cafeId, gps_ok, cafe, user_id)
 
     return {
         "success": True,
@@ -305,14 +311,14 @@ def update_owner_seats(body: OwnerSeatUpdateRequest):
 # ─────────────────────────────────────────────
 
 @app.get("/api/me/stamps")
-def get_my_stamps():
+def get_my_stamps(user_id: int = Depends(auth.current_user_id)):
     """매장별 스탬프 적립 현황."""
     cafes = {int(c["id"]): c for c in store.load_cafes()}
     result = []
     for cafe_id, cafe in cafes.items():
         if not cafe.get("stampGoal"):
             continue                       # 스탬프 운영 안 하는 매장은 제외
-        count = stamp.stamp_count(cafe_id)
+        count = stamp.stamp_count(cafe_id, user_id)
         goal = int(cafe["stampGoal"])
         result.append({
             "cafeId": cafe_id,
@@ -323,18 +329,18 @@ def get_my_stamps():
             "remaining": max(0, goal - count),
         })
     return {
-        "earnedToday": stamp.earned_today(),
+        "earnedToday": stamp.earned_today(user_id),
         "dailyLimit": stamp.DAILY_STAMP_LIMIT,
         "cards": result,
     }
 
 
 @app.get("/api/me/coupons")
-def get_my_coupons():
+def get_my_coupons(user_id: int = Depends(auth.current_user_id)):
     """내 쿠폰 목록 (사용 가능 / 사용 완료)."""
     cafes = {int(c["id"]): c["name"] for c in store.load_cafes()}
     result = []
-    for c in stamp.load_coupons():
+    for c in stamp.load_coupons(user_id):
         result.append({
             "code": c["code"],
             "cafeId": int(c["cafeId"]),
@@ -371,10 +377,10 @@ def use_coupon(code: str, pin: str):
 
 
 @app.get("/api/me/reports")
-def get_my_reports():
+def get_my_reports(user_id: int = Depends(auth.current_user_id)):
     """내 제보 내역 (적립 여부 포함) - WF18."""
     cafes = {int(c["id"]): c["name"] for c in store.load_cafes()}
-    stamps = stamp.load_stamps()
+    stamps = stamp.load_stamps(user_id)
 
     result = []
     for s in sorted(stamps, key=lambda x: x["reportedAt"], reverse=True):
@@ -400,18 +406,18 @@ def get_my_reports():
 # ─────────────────────────────────────────────
 
 @app.get("/api/me/favorites")
-def get_my_favorites():
+def get_my_favorites(user_id: int = Depends(auth.current_user_id)):
     """즐겨찾기한 카페 목록 (혼잡도 포함)."""
     now = datetime.now(KST)
     reports = store.load_reports()
     cafes = {int(c["id"]): c for c in store.load_cafes()}
 
     result = []
-    for fav in store.load_favorites():
+    for fav in store.load_favorites(user_id):
         row = cafes.get(int(fav["cafeId"]))
         if row is None:
             continue                       # 삭제된 카페는 건너뜀
-        cafe = build_cafe_safe(row, reports, now)
+        cafe = build_cafe_safe(row, reports, now, user_id)
         if cafe is None:
             continue
         result.append({
@@ -422,19 +428,19 @@ def get_my_favorites():
 
 
 @app.post("/api/cafes/{cafe_id}/favorite")
-def add_favorite(cafe_id: int):
+def add_favorite(cafe_id: int, user_id: int = Depends(auth.current_user_id)):
     """즐겨찾기 추가 (별 채우기)."""
     if not any(int(c["id"]) == cafe_id for c in store.load_cafes()):
         raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
-    added = store.add_favorite(cafe_id)
+    added = store.add_favorite(cafe_id, user_id)
     return {"success": True, "cafeId": cafe_id, "isFavorite": True,
             "message": "즐겨찾기에 추가했습니다" if added else "이미 즐겨찾기입니다"}
 
 
 @app.delete("/api/cafes/{cafe_id}/favorite")
-def remove_favorite(cafe_id: int):
+def remove_favorite(cafe_id: int, user_id: int = Depends(auth.current_user_id)):
     """즐겨찾기 해제 (별 비우기)."""
-    removed = store.remove_favorite(cafe_id)
+    removed = store.remove_favorite(cafe_id, user_id)
     if not removed:
         raise HTTPException(status_code=404, detail="즐겨찾기에 없는 카페입니다")
     return {"success": True, "cafeId": cafe_id, "isFavorite": False,
@@ -446,11 +452,11 @@ def remove_favorite(cafe_id: int):
 # ─────────────────────────────────────────────
 
 @app.get("/api/me/reviews")
-def get_my_reviews():
+def get_my_reviews(user_id: int = Depends(auth.current_user_id)):
     """내가 쓴 리뷰 목록 (최신순)."""
     cafes = {int(c["id"]): c["name"] for c in store.load_cafes()}
     result = []
-    for r in review.load_reviews():
+    for r in review.load_reviews(user_id):
         result.append({**r, "cafeName": cafes.get(r["cafeId"], "")})
     return {"count": len(result), "reviews": result}
 
@@ -465,27 +471,27 @@ def get_cafe_reviews(cafe_id: int):
 
 
 @app.post("/api/reviews")
-def create_review(body: ReviewCreate):
+def create_review(body: ReviewCreate, user_id: int = Depends(auth.current_user_id)):
     """리뷰 작성."""
     if not any(int(c["id"]) == body.cafeId for c in store.load_cafes()):
         raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
-    created = review.create(body.cafeId, body.rating, body.content, body.tags)
+    created = review.create(body.cafeId, body.rating, body.content, body.tags, user_id)
     return {"success": True, "review": created}
 
 
 @app.patch("/api/reviews/{review_id}")
-def update_review(review_id: int, body: ReviewUpdate):
+def update_review(review_id: int, body: ReviewUpdate, user_id: int = Depends(auth.current_user_id)):
     """리뷰 수정 (보낸 필드만 변경)."""
-    updated = review.update(review_id, body.rating, body.content, body.tags)
+    updated = review.update(review_id, body.rating, body.content, body.tags, user_id)
     if updated is None:
         raise HTTPException(status_code=404, detail="리뷰를 찾을 수 없습니다")
     return {"success": True, "review": updated}
 
 
 @app.delete("/api/reviews/{review_id}")
-def delete_review(review_id: int):
+def delete_review(review_id: int, user_id: int = Depends(auth.current_user_id)):
     """리뷰 삭제."""
-    if not review.delete(review_id):
+    if not review.delete(review_id, user_id):
         raise HTTPException(status_code=404, detail="리뷰를 찾을 수 없습니다")
     return {"success": True, "reviewId": review_id}
 
@@ -628,6 +634,52 @@ def add_reply(cafe_id: int, report_index: int, body: ReplyCreate):
         raise HTTPException(status_code=404, detail="제보를 찾을 수 없습니다")
     created = store.add_reply(cafe_id, report_index, body.agree, body.content)
     return {"success": True, "replyId": created["replyId"]}
+
+
+# ─────────────────────────────────────────────
+# 인증 - 카카오 로그인 (WF07)
+# ─────────────────────────────────────────────
+
+@app.post("/api/auth/kakao")
+async def kakao_login(body: KakaoLoginRequest):
+    """
+    프론트가 받은 카카오 인가 코드를 넘기면
+    우리 서비스 JWT와 유저 정보를 돌려준다.
+    """
+    info = await auth.exchange_kakao_code(body.code, body.redirectUri)
+    user = auth.upsert_user(info["kakaoId"], info["nickname"], info["profileImage"])
+    token = auth.create_token(user)
+    return {
+        "accessToken": token,
+        "user": {
+            "userId": int(user["userId"]),
+            "nickname": user.get("nickname", ""),
+            "profileImage": user.get("profileImage") or None,
+            "isOwner": user.get("isOwner") == "true",
+            "ownerCafeId": int(user["ownerCafeId"]) if user.get("ownerCafeId") else None,
+        },
+    }
+
+
+@app.get("/api/auth/me")
+def get_me(user_id: int = Depends(auth.current_user_id)):
+    """토큰으로 내 정보 조회 (토큰 유효성 확인용)."""
+    user = auth.find_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다")
+    return {
+        "userId": int(user["userId"]),
+        "nickname": user.get("nickname", ""),
+        "profileImage": user.get("profileImage") or None,
+        "isOwner": user.get("isOwner") == "true",
+        "ownerCafeId": int(user["ownerCafeId"]) if user.get("ownerCafeId") else None,
+    }
+
+
+@app.post("/api/auth/logout")
+def logout():
+    """로그아웃. 서버는 토큰을 저장하지 않으므로 프론트가 토큰만 지우면 된다."""
+    return {"success": True, "message": "로그아웃되었습니다"}
 
 
 @app.get("/")

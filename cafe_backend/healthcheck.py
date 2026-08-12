@@ -9,9 +9,14 @@
 
 from fastapi.testclient import TestClient
 
+import auth
 from main import app
 
 client = TestClient(app)
+
+# 로그인 필요한 API용 토큰 (데모 유저)
+_token = auth.create_token({"userId": 1, "nickname": "자리요러"})
+H = {"Authorization": f"Bearer {_token}"}
 
 OK, FAIL = "\033[92m✓\033[0m", "\033[91m✗\033[0m"
 results = []
@@ -76,21 +81,21 @@ check("GET  /api/cafes/4/forecast?minutes=12",
       note=lambda d: f"level={d['crowdLevel']} {d['occupancyPercent']}% ({d['confidence']})")
 
 print("\n[ 스탬프 · 쿠폰 ]")
-check("GET  /api/me/stamps", lambda: client.get("/api/me/stamps"),
+check("GET  /api/me/stamps", lambda: client.get("/api/me/stamps", headers=H),
       note=lambda d: f"카드 {len(d['cards'])}장, 오늘 {d['earnedToday']}/{d['dailyLimit']}")
-check("GET  /api/me/coupons", lambda: client.get("/api/me/coupons"),
+check("GET  /api/me/coupons", lambda: client.get("/api/me/coupons", headers=H),
       note=lambda d: f"사용가능 {d['availableCount']}장")
 check("POST 쿠폰 사용 (PIN 틀림)",
       lambda: client.post("/api/coupons/%23A3F9/use?pin=0000"), expect=400)
 
 print("\n[ 즐겨찾기 ]")
-check("GET  /api/me/favorites", lambda: client.get("/api/me/favorites"),
+check("GET  /api/me/favorites", lambda: client.get("/api/me/favorites", headers=H),
       note=lambda d: f"{d['count']}개")
-check("POST 즐겨찾기 추가", lambda: client.post("/api/cafes/7/favorite"))
-check("DEL  즐겨찾기 해제", lambda: client.delete("/api/cafes/7/favorite"))
+check("POST 즐겨찾기 추가", lambda: client.post("/api/cafes/7/favorite", headers=H))
+check("DEL  즐겨찾기 해제", lambda: client.delete("/api/cafes/7/favorite", headers=H))
 
 print("\n[ 리뷰 ]")
-check("GET  /api/me/reviews", lambda: client.get("/api/me/reviews"),
+check("GET  /api/me/reviews", lambda: client.get("/api/me/reviews", headers=H),
       note=lambda d: f"{d['count']}건")
 check("GET  /api/cafes/12/reviews", lambda: client.get("/api/cafes/12/reviews"),
       note=lambda d: f"평균 {d['averageRating']}점")
@@ -100,7 +105,7 @@ _new_review = {}
 
 
 def _create_review():
-    r = client.post("/api/reviews", json={
+    r = client.post("/api/reviews", headers=H, json={
         "cafeId": 1, "rating": 4, "content": "점검용 리뷰", "tags": ["점검"]})
     if r.status_code == 200:
         _new_review["id"] = r.json()["review"]["reviewId"]
@@ -109,12 +114,12 @@ def _create_review():
 
 check("POST 리뷰 작성", _create_review)
 check("PATCH 리뷰 수정",
-      lambda: client.patch(f"/api/reviews/{_new_review.get('id', 0)}", json={"rating": 5}))
+      lambda: client.patch(f"/api/reviews/{_new_review.get('id', 0)}", headers=H, json={"rating": 5}))
 check("DEL  리뷰 삭제",
-      lambda: client.delete(f"/api/reviews/{_new_review.get('id', 0)}"))
+      lambda: client.delete(f"/api/reviews/{_new_review.get('id', 0)}", headers=H))
 
 print("\n[ 내 활동 · 공지 · 문의 ]")
-check("GET  /api/me/reports", lambda: client.get("/api/me/reports"),
+check("GET  /api/me/reports", lambda: client.get("/api/me/reports", headers=H),
       note=lambda d: f"{d['totalCount']}건 (적립 {d['earnedCount']})")
 check("GET  /api/notices", lambda: client.get("/api/notices"),
       note=lambda d: f"{d['count']}건 (NEW {d['unreadCount']})")
@@ -138,6 +143,13 @@ check("POST 조회수 +1", lambda: client.post("/api/cafes/1/view"))
 check("POST 길찾기 +1", lambda: client.post("/api/cafes/1/directions"))
 check("POST 카페 등록 신청", lambda: client.post("/api/cafe-registrations", json={
     "cafeName": "점검카페", "address": "인천", "method": "business", "value": "123-45-67890"}))
+
+print("\n[ 인증 ]")
+check("GET  /api/auth/me (토큰 O)", lambda: client.get("/api/auth/me", headers=H),
+      note=lambda d: d["nickname"])
+check("GET  /api/me/stamps (토큰 X)", lambda: client.get("/api/me/stamps"), expect=401)
+check("GET  /api/cafes (토큰 X, 열려야 함)", lambda: client.get("/api/cafes"))
+check("POST /api/auth/logout", lambda: client.post("/api/auth/logout"))
 
 print("\n[ 서버 ]")
 check("GET  /", lambda: client.get("/"))

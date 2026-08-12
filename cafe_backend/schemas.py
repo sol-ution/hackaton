@@ -106,12 +106,15 @@ class Cafe(BaseModel):
 
     reportCount24h: int = 0             # 최근 24시간 제보 수
     updatedAt: str                      # ISO 8601, 예: 2026-08-06T15:04:00+09:00
+
     # WF04 상세 화면용 (등록 카페만 값 있음, 미등록은 None)
-    structureNote: Optional[str] = None
-    seatsSolo: Optional[int] = None
-    seatsPair: Optional[int] = None
-    seatsGroup: Optional[int] = None
-    isFavorite : bool = False
+    structureNote: Optional[str] = None      # 예: "1층·2층 좌석 분리, 계단 있음"
+    seatsSolo: Optional[int] = None          # 1인석 수
+    seatsPair: Optional[int] = None          # 2인석 수
+    seatsGroup: Optional[int] = None         # 단체석 수
+
+    isFavorite: bool = False                 # 즐겨찾기 여부 (별 아이콘)
+
 
 # ─────────────────────────────────────────────
 # 제보 요청/응답  (POST /reports)
@@ -152,6 +155,8 @@ class OwnerSeatUpdateRequest(BaseModel):
     """
     cafeId: int
     crowdLevel: CrowdLevel
+
+
 # ─────────────────────────────────────────────
 # 리뷰 (WF19)
 # ─────────────────────────────────────────────
@@ -159,7 +164,7 @@ class OwnerSeatUpdateRequest(BaseModel):
 class ReviewCreate(BaseModel):
     """리뷰 작성 body."""
     cafeId: int
-    rating: int = Field(ge=1, le=5)                   # 별점 1~5
+    rating: int = Field(ge=1, le=5)                  # 별점 1~5
     content: str = Field(default="", max_length=200)  # 한줄평
     tags: list[str] = []                              # 해시태그 (# 제외한 텍스트)
 
@@ -170,10 +175,12 @@ class ReviewUpdate(BaseModel):
     content: Optional[str] = Field(default=None, max_length=200)
     tags: Optional[list[str]] = None
 
+
 class InquiryCreate(BaseModel):
     """문의하기 body (WF15)."""
-    name: str = Field(min_length=1, max_length=30)       # 신청자 이름
+    name: str = Field(min_length=1, max_length=30)      # 신청자 이름
     content: str = Field(min_length=1, max_length=1000)  # 문의 내용
+
 
 # ─────────────────────────────────────────────
 # 사장님 기능 (WF10~12)
@@ -219,11 +226,17 @@ class CafeRegistrationRequest(BaseModel):
     """새 카페 등록 신청 (WF10)."""
     cafeName: str = Field(min_length=1, max_length=50)
     address: str = Field(default="", max_length=100)
-    method: str = Field(default="business")            # business | phone
-    value: str = Field(min_length=1, max_length=30)    # 사업자번호 또는 전화번호
+    method: str = Field(default="business")   # business | phone
+    value: str = Field(min_length=1, max_length=30)   # 사업자번호 또는 전화번호
 
 
 class ReplyCreate(BaseModel):
     """제보 답글(신뢰도 투표)."""
     agree: bool                                        # 동의 여부
     content: str = Field(default="", max_length=100)
+
+
+class KakaoLoginRequest(BaseModel):
+    """카카오 로그인 (WF07). 프론트가 받은 인가 코드를 넘긴다."""
+    code: str = Field(min_length=1)
+    redirectUri: str = Field(min_length=1)
