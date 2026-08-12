@@ -14,8 +14,10 @@ from main import app
 
 client = TestClient(app)
 
-# 로그인 필요한 API용 토큰 (데모 유저)
-_token = auth.create_token({"userId": 1, "nickname": "자리요러"})
+# 로그인 필요한 API 점검용 임시 계정.
+# users.csv가 비어 있어도 점검이 돌아가도록 여기서 만들어 쓴다.
+_test_user = auth.upsert_user("healthcheck-test", "점검계정", "")
+_token = auth.create_token(_test_user)
 H = {"Authorization": f"Bearer {_token}"}
 
 OK, FAIL = "\033[92m✓\033[0m", "\033[91m✗\033[0m"
@@ -85,8 +87,8 @@ check("GET  /api/me/stamps", lambda: client.get("/api/me/stamps", headers=H),
       note=lambda d: f"카드 {len(d['cards'])}장, 오늘 {d['earnedToday']}/{d['dailyLimit']}")
 check("GET  /api/me/coupons", lambda: client.get("/api/me/coupons", headers=H),
       note=lambda d: f"사용가능 {d['availableCount']}장")
-check("POST 쿠폰 사용 (PIN 틀림)",
-      lambda: client.post("/api/coupons/%23A3F9/use?pin=0000"), expect=400)
+check("POST 쿠폰 사용 (없는 쿠폰)",
+      lambda: client.post("/api/coupons/%23NONE/use?pin=0000"), expect=404)
 
 print("\n[ 즐겨찾기 ]")
 check("GET  /api/me/favorites", lambda: client.get("/api/me/favorites", headers=H),

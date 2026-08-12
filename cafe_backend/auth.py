@@ -9,10 +9,10 @@
   5. 우리 서비스 JWT를 만들어 프론트에 반환
   6. 이후 요청은 Authorization: Bearer <JWT>
 
-⚠️ 데모 정책:
-   첫 로그인 유저는 데모 데이터(userId=1)를 물려받는다.
-   안 그러면 로그인하는 순간 즐겨찾기·스탬프·리뷰가 전부 0이 되어
-   마이페이지가 텅 비어 보인다. users.csv의 demoLinked 컬럼으로 관리.
+정책:
+   신규 카카오 계정은 즐겨찾기 0, 제보 0으로 시작한다.
+   같은 계정으로 다시 로그인하면 kakaoId로 기존 userId를 찾아
+   본인이 만든 기록이 그대로 이어진다.
 """
 
 import csv
@@ -38,8 +38,7 @@ JWT_SECRET = os.getenv("JWT_SECRET", "zari-demo-secret-change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
 
-DEMO_USER_ID = 1          # 시드 데이터가 붙어 있는 유저
-DEMO_NICKNAME = "자리요러"
+DEMO_USER_ID = 1          # 비로그인 요청을 처리할 때 쓰는 기본값
 
 USER_FIELDS = ["userId", "kakaoId", "nickname", "profileImage",
                "isOwner", "ownerCafeId", "joinedAt"]
@@ -82,7 +81,8 @@ def _find_by_kakao(kakao_id: str) -> dict | None:
 def upsert_user(kakao_id: str, nickname: str, profile_image: str) -> dict:
     """
     카카오 사용자를 우리 유저로 등록/조회.
-    첫 로그인이면 데모 데이터(userId=1)를 물려받는다.
+    - 이미 가입한 kakaoId면 기존 userId를 그대로 돌려준다 (기록 이어짐)
+    - 처음 보는 kakaoId면 새 userId를 발급한다 (모든 기록 0에서 시작)
     """
     with _lock:
         rows = _read_users()
@@ -94,16 +94,7 @@ def upsert_user(kakao_id: str, nickname: str, profile_image: str) -> dict:
                 _write_users(rows)
             return existing
 
-        # 데모 유저(1번)에 아직 카카오 계정이 안 붙어 있으면 그 자리를 물려준다
-        demo = next((u for u in rows if int(u["userId"]) == DEMO_USER_ID), None)
-        if demo is not None and not demo.get("kakaoId"):
-            demo["kakaoId"] = str(kakao_id)
-            demo["nickname"] = nickname or DEMO_NICKNAME
-            demo["profileImage"] = profile_image or ""
-            _write_users(rows)
-            return demo
-
-        # 그 외에는 새 유저로 추가 (데이터는 비어 있음)
+        # 신규 계정은 항상 새 userId로 추가한다 (즐겨찾기·제보 0에서 시작)
         ids = []
         for u in rows:
             try:
