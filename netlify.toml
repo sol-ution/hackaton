@@ -1,0 +1,23 @@
+# Netlify 배포 설정.
+#
+# 이 저장소는 백엔드(cafe_backend)와 프론트(cafe_frontend)가 한 곳에 있어서
+# base로 프론트 폴더를 지정해야 한다. command와 publish는 base 기준 상대경로.
+
+[build]
+  base = "cafe_frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 8이 Node 20.19+ / 22.12+ 를 요구한다. 22 LTS로 고정.
+  NODE_VERSION = "22"
+
+# SPA 폴백 — 이거 없으면 카카오 로그인이 완성되지 않는다.
+#
+# App.tsx가 라우터 없이 pathname을 보고 화면을 고르는 구조라, 카카오가
+# /auth/kakao/callback 으로 "직접" 리다이렉트해 보내면 서버엔 그런 파일이 없어서
+# 404가 난다. 모든 경로를 index.html로 넘겨야 콜백 화면이 뜬다.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

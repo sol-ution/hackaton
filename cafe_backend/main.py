@@ -48,18 +48,33 @@ DEMO_SKIP_GPS = True        # 발표 당일 True(거리검증 통과), 실서비
 # LAN IP는 와이파이가 바뀔 때마다 달라지므로(172.x / 192.168.x / 10.x),
 # 하나씩 적지 않고 사설 IP 대역 전체를 정규식으로 허용한다.
 # 발표 당일 IP가 뭐로 잡히든 CORS를 다시 손댈 필요가 없다.
+#
+# ⚠️ 배포 도메인 허용 줄을 지우지 말 것.
+#    main.py를 크게 손볼 때 두 번(adc9eed, bee0370) 날아간 적이 있다.
+#    이게 없으면 배포된 프론트에서 오는 요청이 전부 CORS로 막힌다.
+#    (로컬은 멀쩡하고 배포본만 죽어서 원인 찾는 데 오래 걸린다.)
 CORS_ORIGIN_REGEX = (
-    r"http://(localhost|127\.0\.0\.1"
+    r"(http://(localhost|127\.0\.0\.1"
     r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
     r"|192\.168\.\d{1,3}\.\d{1,3}"
     r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})"
-    r":\d+"
+    r":\d+)"
+    # Netlify 배포본. 브랜치/미리보기 배포는 <해시>--<사이트>.netlify.app 형태로
+    # 도메인이 매번 달라지므로 사이트 이름을 박지 않고 서브도메인 전체를 받는다.
+    r"|(https://[a-z0-9-]+\.netlify\.app)"
 )
+
+# 위 정규식으로 안 잡히는 도메인(커스텀 도메인 등)은 코드를 고치지 말고
+# Render 환경변수 EXTRA_CORS_ORIGINS에 콤마로 나열하면 된다.
+EXTRA_CORS_ORIGINS = [
+    o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()
+]
 
 app = FastAPI(title="zari API", version="3.0")
 
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=EXTRA_CORS_ORIGINS,
     allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
