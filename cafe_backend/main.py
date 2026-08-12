@@ -276,7 +276,7 @@ def get_cafe_forecast(cafe_id: int, minutes: int = 12):
 
 
 @app.post("/api/reports")
-def create_report(body: CrowdReportRequest, user_id: int = Depends(auth.optional_user_id)):
+def create_report(body: CrowdReportRequest, user_id: int = Depends(auth.current_user_id)):
     # 카페 찾기
     cafe = next((r for r in store.load_cafes() if int(r["id"]) == body.cafeId), None)
     if cafe is None:
@@ -305,7 +305,8 @@ def create_report(body: CrowdReportRequest, user_id: int = Depends(auth.optional
         "reportedAt": datetime.now(KST).isoformat(),
     })
     # 스탬프 적립 시도 (GPS 반경 안에서 제보한 경우만 적립)
-    gps_ok = dist <= GPS_RADIUS_M
+    # 발표 모드에서는 발표장이 카페와 멀어도 스탬프 적립까지 함께 시연한다.
+    gps_ok = DEMO_SKIP_GPS or dist <= GPS_RADIUS_M
     stamp_result = stamp.try_earn(body.cafeId, gps_ok, cafe, user_id)
 
     return {
@@ -374,12 +375,16 @@ def get_my_coupons(user_id: int = Depends(auth.current_user_id)):
 
 
 @app.post("/api/coupons/{code}/use")
-def use_coupon(code: str, pin: str):
+def use_coupon(code: str, pin: str,
+               user_id: int = Depends(auth.current_user_id)):
     """
     쿠폰 사용 처리. 유저 폰에 PIN 입력창이 뜨고 사장님이 매장 PIN을 입력한다.
     code는 URL에 '#'이 들어가므로 프론트에서 인코딩 필요 (%23A3F9).
     """
-    coupon = next((c for c in stamp.load_coupons() if c["code"] == code), None)
+    coupon = next(
+        (c for c in stamp.load_coupons(user_id) if c["code"] == code),
+        None,
+    )
     if coupon is None:
         raise HTTPException(status_code=404, detail="쿠폰을 찾을 수 없습니다")
 
@@ -388,9 +393,20 @@ def use_coupon(code: str, pin: str):
     if cafe is None:
         raise HTTPException(status_code=404, detail="매장을 찾을 수 없습니다")
 
-    result = stamp.use_coupon(code, pin, cafe)
+    result = stamp.use_coupon(code, pin, cafe, user_id)
     if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["message"])
+        status_by_error = {
+            "invalid_pin_format": 422,
+            "pin_not_configured": 500,
+            "invalid_pin": 403,
+            "already_used": 409,
+            "expired": 409,
+            "not_found": 404,
+        }
+        raise HTTPException(
+            status_code=status_by_error.get(result.get("error"), 400),
+            detail=result["message"],
+        )
     return result
 
 
@@ -398,7 +414,12 @@ def use_coupon(code: str, pin: str):
 def get_my_reports(user_id: int = Depends(auth.current_user_id)):
     """내 제보 내역 (적립 여부 포함) - WF18."""
     cafes = {int(c["id"]): c["name"] for c in store.load_cafes()}
-    stamps = stamp.load_stamps(user_id)
+    # 발표용 14개 시드는 실제 사용자가 작성한 제보가 아니므로
+    # "내 제보" 숫자와 목록에서는 제외한다.
+    stamps = [
+        s for s in stamp.load_stamps(user_id)
+        if s.get("reason") != stamp.DEMO_SEED_REASON
+    ]
 
     result = []
     for s in sorted(stamps, key=lambda x: x["reportedAt"], reverse=True):
@@ -666,11 +687,18 @@ async def kakao_login(body: KakaoLoginRequest):
     """
     info = await auth.exchange_kakao_code(body.code, body.redirectUri)
     user = auth.upsert_user(info["kakaoId"], info["nickname"], info["profileImage"])
+    stamp.ensure_demo_account(
+        int(user["userId"]),
+        info["kakaoId"],
+        store.load_cafes(),
+    )
     token = auth.create_token(user)
     return {
         "accessToken": token,
         "user": {
             "userId": int(user["userId"]),
+            # 본인 발표 계정의 DEMO_KAKAO_ID 설정을 확인할 때만 사용한다.
+            "kakaoId": user.get("kakaoId", ""),
             "nickname": user.get("nickname", ""),
             "profileImage": user.get("profileImage") or None,
             "isOwner": user.get("isOwner") == "true",
@@ -687,6 +715,7 @@ def get_me(user_id: int = Depends(auth.current_user_id)):
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다")
     return {
         "userId": int(user["userId"]),
+        "kakaoId": user.get("kakaoId", ""),
         "nickname": user.get("nickname", ""),
         "profileImage": user.get("profileImage") or None,
         "isOwner": user.get("isOwner") == "true",

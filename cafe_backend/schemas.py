@@ -219,7 +219,7 @@ class StampSettingsUpdate(BaseModel):
     dailyLimit: Optional[int] = Field(default=None, ge=1, le=10)
     radiusMeters: Optional[int] = Field(default=None, ge=10, le=1000)
     validDays: Optional[int] = Field(default=None, ge=1, le=365)
-    ownerPin: Optional[str] = Field(default=None, min_length=4, max_length=6)
+    ownerPin: Optional[str] = Field(default=None, min_length=3, max_length=6)
 
 
 class CafeRegistrationRequest(BaseModel):

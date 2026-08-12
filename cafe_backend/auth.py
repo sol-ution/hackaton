@@ -38,7 +38,7 @@ JWT_SECRET = os.getenv("JWT_SECRET", "zari-demo-secret-change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
 
-DEMO_USER_ID = 1          # 비로그인 요청을 처리할 때 쓰는 기본값
+ANONYMOUS_USER_ID = 0     # 실제 users.csv에 존재하지 않는 비로그인 전용 값
 
 USER_FIELDS = ["userId", "kakaoId", "nickname", "profileImage",
                "isOwner", "ownerCafeId", "joinedAt"]
@@ -201,4 +201,4 @@ def optional_user_id(authorization: str | None = Header(default=None)) -> int:
         user_id = _decode(authorization.split(" ", 1)[1].strip())
         if user_id is not None:
             return user_id
-    return DEMO_USER_ID
+    return ANONYMOUS_USER_ID
