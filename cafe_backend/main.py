@@ -76,6 +76,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=EXTRA_CORS_ORIGINS,
     allow_origin_regex=CORS_ORIGIN_REGEX,
+    allow_origins=["https://zari-frontend-git-main-zari3.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
