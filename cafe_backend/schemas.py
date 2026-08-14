@@ -98,6 +98,7 @@ class Cafe(BaseModel):
     emptySeats: Optional[int]
 
     tags: list[CafeTag] = []
+    photos: list[str] = []  # "/photos/xxx.jpg" 형태 상대경로. 0번째가 대표 사진.
 
     hasSmokingRoom: bool
     # 아래 3개는 사장님이 매장 정보(WF12)에서 설정하는 값.

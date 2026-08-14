@@ -20,8 +20,9 @@ from dotenv import load_dotenv
 load_dotenv()  # .env의 카카오 키·JWT 시크릿을 환경변수로
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import store
 import forecast as forecast_mod
@@ -83,6 +84,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 사장님이 업로드한 매장 사진. 정적 파일로 그대로 서빙한다.
+# 주의: Render 무료 플랜은 디스크가 영구저장이 아니라서, 재배포하면 여기 저장된
+# 사진 파일은 다 날아간다(코드/데이터는 git이 지켜주지만 업로드 파일은 아님).
+# 나중에 진짜 서비스로 가면 S3 같은 외부 스토리지로 옮겨야 한다.
+owner.PHOTOS_DIR.mkdir(exist_ok=True)
+app.mount("/photos", StaticFiles(directory=str(owner.PHOTOS_DIR)), name="photos")
 
 
 def haversine_m(lat1, lng1, lat2, lng2) -> float:
@@ -155,6 +163,7 @@ def build_cafe(row: dict, reports: list[dict], now: datetime, user_id: int = 1) 
         totalSeats=i(row.get("totalSeats")),
         emptySeats=i(row.get("emptySeats")),
         tags=row["tags"].split("|") if row.get("tags") else [],
+        photos=row["photos"].split("|") if row.get("photos") else [],
         hasSmokingRoom=row.get("hasSmokingRoom") == "true",
         hasWifi=row.get("hasWifi") == "true",
         noTimeLimit=row.get("noTimeLimit") == "true",
@@ -633,6 +642,27 @@ def update_store_info(cafe_id: int, body: StoreInfoUpdate):
     if data is None:
         raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
     return {"success": True, "info": data}
+
+
+@app.post("/api/owner/{cafe_id}/photos")
+async def upload_store_photo(cafe_id: int, file: UploadFile = File(...)):
+    """매장 사진 업로드 (WF12). 첫 번째 사진이 지도/리스트 대표 사진으로 쓰인다."""
+    try:
+        result = await owner.add_photo(cafe_id, file)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
+    return result
+
+
+@app.delete("/api/owner/{cafe_id}/photos/{filename}")
+def delete_store_photo(cafe_id: int, filename: str):
+    """매장 사진 삭제."""
+    result = owner.remove_photo(cafe_id, filename)
+    if result is None:
+        raise HTTPException(status_code=404, detail="카페 또는 사진을 찾을 수 없습니다")
+    return result
 
 
 @app.post("/api/cafes/{cafe_id}/view")

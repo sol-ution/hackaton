@@ -7,6 +7,7 @@
 
 import csv
 import threading
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,10 @@ import store
 
 BASE = Path(__file__).parent
 REGISTRATIONS_CSV = BASE / "registrations.csv"
+PHOTOS_DIR = BASE / "photos"
+ALLOWED_PHOTO_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+MAX_PHOTOS_PER_CAFE = 6
+MAX_PHOTO_BYTES = 8 * 1024 * 1024  # 8MB
 
 KST = timezone(timedelta(hours=9))
 _lock = threading.Lock()
@@ -218,6 +223,69 @@ def update_store_info(cafe_id: int, patch: dict) -> dict | None:
         target["updatedAt"] = datetime.now(KST).isoformat()
         _save_cafes(rows)
         return get_store_info(cafe_id)
+
+
+# ─────────────────────────────────────────────
+# 매장 사진 (WF12)
+# ─────────────────────────────────────────────
+
+async def add_photo(cafe_id: int, file) -> dict | None:
+    """
+    사장님이 올린 매장 사진을 저장하고 cafes.csv의 photos 컬럼(파이프 구분)에 append.
+    맨 앞(0번째)이 지도/리스트 대표 사진으로 쓰인다.
+    """
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_PHOTO_EXT:
+        raise ValueError("jpg/jpeg/png/webp/gif 파일만 업로드할 수 있어요")
+
+    data = await file.read()
+    if len(data) > MAX_PHOTO_BYTES:
+        raise ValueError("사진 용량은 8MB를 넘을 수 없어요")
+
+    with _lock:
+        rows = store.load_cafes()
+        target = next((r for r in rows if int(r["id"]) == cafe_id), None)
+        if target is None:
+            return None
+
+        photos = [p for p in (target.get("photos") or "").split("|") if p]
+        if len(photos) >= MAX_PHOTOS_PER_CAFE:
+            raise ValueError(f"사진은 최대 {MAX_PHOTOS_PER_CAFE}장까지만 등록할 수 있어요")
+
+        PHOTOS_DIR.mkdir(exist_ok=True)
+        filename = f"{cafe_id}_{uuid.uuid4().hex[:10]}{ext}"
+        (PHOTOS_DIR / filename).write_bytes(data)
+
+        photos.append(f"/photos/{filename}")
+        target["photos"] = "|".join(photos)
+        target["updatedAt"] = datetime.now(KST).isoformat()
+        _save_cafes(rows)
+        return {"photos": photos}
+
+
+def remove_photo(cafe_id: int, filename: str) -> dict | None:
+    """매장 사진 삭제. filename은 URL의 마지막 부분(예: '3_ab12cd34ef.jpg')."""
+    with _lock:
+        rows = store.load_cafes()
+        target = next((r for r in rows if int(r["id"]) == cafe_id), None)
+        if target is None:
+            return None
+
+        photos = [p for p in (target.get("photos") or "").split("|") if p]
+        url = f"/photos/{filename}"
+        if url not in photos:
+            return None
+        photos.remove(url)
+        target["photos"] = "|".join(photos)
+        target["updatedAt"] = datetime.now(KST).isoformat()
+        _save_cafes(rows)
+
+        try:
+            (PHOTOS_DIR / filename).unlink(missing_ok=True)
+        except OSError:
+            pass  # 파일 삭제 실패해도 목록에서는 이미 뺐으니 그냥 넘어간다
+
+        return {"photos": photos}
 
 
 # ─────────────────────────────────────────────
