@@ -100,6 +100,11 @@ class Cafe(BaseModel):
     tags: list[CafeTag] = []
 
     hasSmokingRoom: bool
+    # 아래 3개는 사장님이 매장 정보(WF12)에서 설정하는 값.
+    # 손님 카테고리 필터(시간 제한 없음/주차 가능/와이파이)가 쓰므로 목록 응답에 함께 내려준다.
+    hasWifi: bool = False
+    noTimeLimit: bool = False
+    hasParking: bool = False
     restroomScore: Optional[int] = Field(default=None, ge=1, le=5)  # 화장실 청결도 1~5
     quietScore: Optional[int] = Field(default=None, ge=1, le=5)     # 조용함 1~5
     outletLevel: Optional[OutletLevel]                              # 콘센트 여유
