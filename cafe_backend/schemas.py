@@ -187,6 +187,13 @@ class InquiryCreate(BaseModel):
 # ─────────────────────────────────────────────
 
 class Amenities(BaseModel):
+    # study·talk·wideTable·lateNight은 손님용 카테고리 필터(공부/대화/넓은 테이블/심야 영업)
+    # 태그와 짝을 맞추려고 추가됨. quiet·outlet과 동일하게 cafes.csv의 tags 컬럼에
+    # 그대로 반영된다(owner.py 참고) — 상세화면 태그는 이 토글로만 켜고 끌 수 있어야 한다.
+    study: Optional[bool] = None
+    talk: Optional[bool] = None
+    wideTable: Optional[bool] = None
+    lateNight: Optional[bool] = None
     outlet: Optional[bool] = None
     wifi: Optional[bool] = None
     quiet: Optional[bool] = None
