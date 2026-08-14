@@ -48,3 +48,24 @@ uvicorn main:app --reload
 
 - `GPS_RADIUS_M = 150` — 제보 허용 반경
 - `CORS_ORIGINS` — 발표 당일 LAN IP 여기 추가
+# 발표 계정 스탬프·쿠폰 설정
+
+일반 신규 카카오 계정은 즐겨찾기, 제보, 스탬프, 쿠폰이 모두 0에서
+시작합니다. 특정 발표 계정에만 시연 데이터를 넣으려면 Render 환경변수에
+다음 값을 등록하세요.
+
+```env
+DEMO_KAKAO_ID=발표에_사용할_실제_카카오_ID
+OWNER_REDEEM_PIN=숫자_3자리
+DEMO_FULL_COUPON_CAFE_ID=1
+DEMO_PARTIAL_STAMP_CAFE_ID=2
+DEMO_PARTIAL_STAMP_COUNT=14
+```
+
+- 발표 계정 최초 로그인: 카페 1의 사용 가능 쿠폰 1장, 카페 2의 14/20
+  스탬프가 한 번만 생성됩니다.
+- 카페 1은 쿠폰 발급 후 새 카드가 시작된 상태라 0/20으로 표시됩니다.
+- 재로그인해도 시드가 다시 적용되지 않으므로 15번째 스탬프와 쿠폰 사용
+  상태가 유지됩니다.
+- 쿠폰 사용: `POST /api/coupons/{code}/use?pin=123`
+  (`Authorization: Bearer <JWT>` 필수)
