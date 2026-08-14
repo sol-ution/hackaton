@@ -110,6 +110,27 @@ def build_cafe(row: dict, reports: list[dict], now: datetime, user_id: int = 1) 
         except (ValueError, TypeError):
             return None
 
+    def avg_report_score(reports: list[dict], key: str) -> int | None:
+        """제보에 남겨진 화장실 청결도/조용함 점수 평균(반올림). 제보 없으면 None."""
+        vals = []
+        for r in reports:
+            v = r.get(key)
+            try:
+                if v not in ("", None):
+                    vals.append(int(v))
+            except (ValueError, TypeError):
+                continue
+        return round(sum(vals) / len(vals)) if vals else None
+
+    # 화장실 청결도·조용함은 "손님 제보 평균"이어야 하므로 실제 제보(reports.csv)가 있으면
+    # 그 평균을 쓰고, 제보가 아직 없는 카페는 초기 시드값(cafes.csv)으로 대체한다.
+    restroom_score = avg_report_score(my_reports, "restroomScore")
+    if restroom_score is None:
+        restroom_score = i(row.get("restroomScore"))
+    quiet_score = avg_report_score(my_reports, "quietScore")
+    if quiet_score is None:
+        quiet_score = i(row.get("quietScore"))
+
     # 최근 24시간 제보 수. reportedAt이 깨진 행은 세지 않는다.
     day_ago = now - timedelta(hours=24)
     rc24 = 0
@@ -135,8 +156,11 @@ def build_cafe(row: dict, reports: list[dict], now: datetime, user_id: int = 1) 
         emptySeats=i(row.get("emptySeats")),
         tags=row["tags"].split("|") if row.get("tags") else [],
         hasSmokingRoom=row.get("hasSmokingRoom") == "true",
-        restroomScore=i(row.get("restroomScore")),
-        quietScore=i(row.get("quietScore")),
+        hasWifi=row.get("hasWifi") == "true",
+        noTimeLimit=row.get("noTimeLimit") == "true",
+        hasParking=row.get("hasParking") == "true",
+        restroomScore=restroom_score,
+        quietScore=quiet_score,
         outletLevel=row["outletLevel"] if row.get("outletLevel") else None,
         reportCount24h=rc24,
         updatedAt=row["updatedAt"],
@@ -290,8 +314,10 @@ def create_report(body: CrowdReportRequest, user_id: int = Depends(auth.current_
             detail=f"카페 반경 {GPS_RADIUS_M}m 밖입니다 (현재 {dist:.1f}m)",
         )
 
-    # 저장
+    # 제보 원문과 스탬프 기록이 정확히 연결되도록 같은 시각을 사용한다.
+    reported_at = datetime.now(KST).isoformat()
     store.append_report({
+        "userId": user_id,
         "cafeId": body.cafeId,
         "crowdLevel": int(body.crowdLevel),
         "quietScore": body.quietScore,
@@ -302,12 +328,12 @@ def create_report(body: CrowdReportRequest, user_id: int = Depends(auth.current_
         "note": body.note,
         # 로그인이 스텁이라 새 제보는 "나"로 고정 (데모에서 방금 넣은 제보가 눈에 띄게)
         "nickname": "나",
-        "reportedAt": datetime.now(KST).isoformat(),
+        "reportedAt": reported_at,
     })
     # 스탬프 적립 시도 (GPS 반경 안에서 제보한 경우만 적립)
     # 발표 모드에서는 발표장이 카페와 멀어도 스탬프 적립까지 함께 시연한다.
     gps_ok = DEMO_SKIP_GPS or dist <= GPS_RADIUS_M
-    stamp_result = stamp.try_earn(body.cafeId, gps_ok, cafe, user_id)
+    stamp_result = stamp.try_earn(body.cafeId, gps_ok, cafe, user_id, reported_at)
 
     return {
         "success": True,
@@ -421,11 +447,22 @@ def get_my_reports(user_id: int = Depends(auth.current_user_id)):
         if s.get("reason") != stamp.DEMO_SEED_REASON
     ]
 
+    report_rows = {
+        (int(r["cafeId"]), r.get("reportedAt", "")): r
+        for r in store.load_reports()
+        if store.safe_int(r.get("userId")) == user_id
+        and store.safe_int(r.get("cafeId")) is not None
+    }
+
     result = []
     for s in sorted(stamps, key=lambda x: x["reportedAt"], reverse=True):
+        cafe_id = int(s["cafeId"])
+        source = report_rows.get((cafe_id, s["reportedAt"]), {})
         result.append({
-            "cafeId": int(s["cafeId"]),
-            "cafeName": cafes.get(int(s["cafeId"]), ""),
+            "cafeId": cafe_id,
+            "cafeName": cafes.get(cafe_id, ""),
+            "crowdLevel": store.safe_int(source.get("crowdLevel")),
+            "note": source.get("note", ""),
             "reportedAt": s["reportedAt"],
             "earned": s["earned"] == "true",
             "reason": s["reason"],
@@ -642,6 +679,26 @@ def owner_coupons(cafe_id: int):
     if not any(int(c["id"]) == cafe_id for c in store.load_cafes()):
         raise HTTPException(status_code=404, detail="카페를 찾을 수 없습니다")
     return owner.coupon_management(cafe_id)
+
+
+@app.post("/api/owner/{cafe_id}/coupons/{code}/use")
+def owner_use_coupon(cafe_id: int, code: str, pin: str):
+    """사장님 화면에서 해당 매장의 대기 쿠폰을 사용 처리한다."""
+    cafe = next((row for row in store.load_cafes() if int(row["id"]) == cafe_id), None)
+    if cafe is None:
+        raise HTTPException(status_code=404, detail="매장을 찾을 수 없습니다")
+    result = stamp.use_coupon_for_owner(code, pin, cafe)
+    if not result["success"]:
+        status_by_error = {
+            "invalid_pin_format": 422,
+            "pin_not_configured": 500,
+            "invalid_pin": 403,
+            "already_used": 409,
+            "expired": 409,
+            "not_found": 404,
+        }
+        raise HTTPException(status_code=status_by_error.get(result.get("error"), 400), detail=result["message"])
+    return result
 
 
 # ─────────────────────────────────────────────

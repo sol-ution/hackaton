@@ -37,7 +37,7 @@ def safe_int(value, default=None):
         return default
 
 REPORT_FIELDS = [
-    "cafeId", "crowdLevel", "quietScore", "restroomScore", "outletLevel",
+    "userId", "cafeId", "crowdLevel", "quietScore", "restroomScore", "outletLevel",
     "smokingRoom", "visitCount", "note", "nickname", "reportedAt",
 ]
 
@@ -95,9 +95,20 @@ def reports_for(cafe_id: int, reports: list[dict] | None = None) -> list[dict]:
 def append_report(row: dict) -> None:
     """제보 한 건을 reports.csv에 append (락으로 보호)."""
     with _write_lock:
-        exists = REPORTS_CSV.exists()
+        exists = REPORTS_CSV.exists() and REPORTS_CSV.stat().st_size > 0
+        if exists:
+            with open(REPORTS_CSV, encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                old_fields = reader.fieldnames or []
+                old_rows = list(reader)
+            if old_fields != REPORT_FIELDS:
+                # 기존 CSV에 userId 열이 없더라도 배포가 깨지지 않게 한 번 마이그레이션한다.
+                with open(REPORTS_CSV, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=REPORT_FIELDS, extrasaction="ignore")
+                    writer.writeheader()
+                    writer.writerows(old_rows)
         with open(REPORTS_CSV, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=REPORT_FIELDS)
+            writer = csv.DictWriter(f, fieldnames=REPORT_FIELDS, extrasaction="ignore")
             if not exists:
                 writer.writeheader()
             writer.writerow(row)

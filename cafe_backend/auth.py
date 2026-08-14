@@ -9,10 +9,10 @@
   5. 우리 서비스 JWT를 만들어 프론트에 반환
   6. 이후 요청은 Authorization: Bearer <JWT>
 
-정책:
-   신규 카카오 계정은 즐겨찾기 0, 제보 0으로 시작한다.
-   같은 계정으로 다시 로그인하면 kakaoId로 기존 userId를 찾아
-   본인이 만든 기록이 그대로 이어진다.
+⚠️ 데모 정책:
+   첫 로그인 유저는 데모 데이터(userId=1)를 물려받는다.
+   안 그러면 로그인하는 순간 즐겨찾기·스탬프·리뷰가 전부 0이 되어
+   마이페이지가 텅 비어 보인다. users.csv의 demoLinked 컬럼으로 관리.
 """
 
 import csv
@@ -38,7 +38,8 @@ JWT_SECRET = os.getenv("JWT_SECRET", "zari-demo-secret-change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
 
-ANONYMOUS_USER_ID = 0     # 실제 users.csv에 존재하지 않는 비로그인 전용 값
+DEMO_USER_ID = 1          # 시드 데이터가 붙어 있는 유저
+DEMO_NICKNAME = "자리요러"
 
 USER_FIELDS = ["userId", "kakaoId", "nickname", "profileImage",
                "isOwner", "ownerCafeId", "joinedAt"]
@@ -81,8 +82,7 @@ def _find_by_kakao(kakao_id: str) -> dict | None:
 def upsert_user(kakao_id: str, nickname: str, profile_image: str) -> dict:
     """
     카카오 사용자를 우리 유저로 등록/조회.
-    - 이미 가입한 kakaoId면 기존 userId를 그대로 돌려준다 (기록 이어짐)
-    - 처음 보는 kakaoId면 새 userId를 발급한다 (모든 기록 0에서 시작)
+    첫 로그인이면 데모 데이터(userId=1)를 물려받는다.
     """
     with _lock:
         rows = _read_users()
@@ -94,7 +94,16 @@ def upsert_user(kakao_id: str, nickname: str, profile_image: str) -> dict:
                 _write_users(rows)
             return existing
 
-        # 신규 계정은 항상 새 userId로 추가한다 (즐겨찾기·제보 0에서 시작)
+        # 데모 유저(1번)에 아직 카카오 계정이 안 붙어 있으면 그 자리를 물려준다
+        demo = next((u for u in rows if int(u["userId"]) == DEMO_USER_ID), None)
+        if demo is not None and not demo.get("kakaoId"):
+            demo["kakaoId"] = str(kakao_id)
+            demo["nickname"] = nickname or DEMO_NICKNAME
+            demo["profileImage"] = profile_image or ""
+            _write_users(rows)
+            return demo
+
+        # 그 외에는 새 유저로 추가 (데이터는 비어 있음)
         ids = []
         for u in rows:
             try:
@@ -180,15 +189,11 @@ def _decode(token: str) -> int | None:
 
 def current_user_id(authorization: str | None = Header(default=None)) -> int:
     """
-    로그인 필수 엔드포인트용 의존성.
-    Authorization: Bearer <token> 헤더에서 userId를 꺼낸다.
+    유저 식별용 의존성.
+    비로그인도 로그인 사용자와 동일하게 쓸 수 있어야 하므로(마이페이지·혼잡도 제보 포함)
+    토큰이 없거나 잘못돼도 401로 막지 않고 데모 유저로 취급한다.
     """
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다")
-    user_id = _decode(authorization.split(" ", 1)[1].strip())
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다")
-    return user_id
+    return optional_user_id(authorization)
 
 
 def optional_user_id(authorization: str | None = Header(default=None)) -> int:
@@ -201,4 +206,4 @@ def optional_user_id(authorization: str | None = Header(default=None)) -> int:
         user_id = _decode(authorization.split(" ", 1)[1].strip())
         if user_id is not None:
             return user_id
-    return ANONYMOUS_USER_ID
+    return DEMO_USER_ID

@@ -232,13 +232,17 @@ def earned_today(user_id: int = ANONYMOUS_USER_ID) -> int:
 
 
 def try_earn(cafe_id: int, gps_verified: bool, cafe_row: dict,
-             user_id: int = ANONYMOUS_USER_ID) -> dict:
+             user_id: int = ANONYMOUS_USER_ID,
+             reported_at: str | None = None) -> dict:
     """
     제보 후 스탬프 적립 시도.
     반환: {earned, reason, count, goal, couponIssued}
     """
     with _lock:
-        now = datetime.now(KST)
+        try:
+            now = datetime.fromisoformat(reported_at) if reported_at else datetime.now(KST)
+        except (TypeError, ValueError):
+            now = datetime.now(KST)
         goal = int(cafe_row.get("stampGoal") or DEFAULT_GOAL)
         reward = cafe_row.get("stampReward") or "아메리카노 1잔 무료"
 
@@ -353,3 +357,30 @@ def use_coupon(code: str, pin: str, cafe_row: dict,
             "error": "not_found",
             "message": "쿠폰을 찾을 수 없습니다",
         }
+
+
+def use_coupon_for_owner(code: str, pin: str, cafe_row: dict) -> dict:
+    """사장님 화면에서 해당 매장의 쿠폰을 사용자와 무관하게 사용 처리한다."""
+    with _lock:
+        if not re.fullmatch(r"\d{3}", pin):
+            return {"success": False, "error": "invalid_pin_format", "message": "사장님 인증번호는 숫자 3자리여야 합니다"}
+        if not re.fullmatch(r"\d{3}", OWNER_REDEEM_PIN):
+            return {"success": False, "error": "pin_not_configured", "message": "서버에 사장님 인증번호가 설정되지 않았습니다"}
+        if pin != OWNER_REDEEM_PIN:
+            return {"success": False, "error": "invalid_pin", "message": "사장님 인증번호가 올바르지 않습니다"}
+
+        cafe_id = _row_int(cafe_row, "id")
+        rows = _read(COUPONS_CSV)
+        for row in rows:
+            if row.get("code") != code or _row_int(row, "cafeId") != cafe_id:
+                continue
+            if row.get("usedAt"):
+                return {"success": False, "error": "already_used", "message": "이미 사용된 쿠폰입니다"}
+            if datetime.fromisoformat(row["expiresAt"]) < datetime.now(KST):
+                return {"success": False, "error": "expired", "message": "유효기간이 지난 쿠폰입니다"}
+            used_at = datetime.now(KST).isoformat()
+            row["usedAt"] = used_at
+            _write(COUPONS_CSV, COUPON_FIELDS, rows)
+            return {"success": True, "message": "쿠폰 사용이 완료됐어요.", "code": code, "usedAt": used_at}
+
+        return {"success": False, "error": "not_found", "message": "이 매장의 쿠폰을 찾을 수 없습니다"}

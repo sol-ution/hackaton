@@ -134,9 +134,13 @@ def get_store_info(cafe_id: int) -> dict | None:
         "holiday": cafe.get("holiday") or None,
         "structureNote": cafe.get("structureNote") or None,
         "amenities": {
+            "study": "study" in (cafe.get("tags") or "").split("|"),
+            "talk": "talk" in (cafe.get("tags") or "").split("|"),
+            "wideTable": "wide-table" in (cafe.get("tags") or "").split("|"),
+            "lateNight": "late-night" in (cafe.get("tags") or "").split("|"),
             "outlet": cafe.get("outletLevel") == "many",
             "wifi": b(cafe.get("hasWifi", "")),
-            "quiet": "quiet" in (cafe.get("tags") or ""),
+            "quiet": "quiet" in (cafe.get("tags") or "").split("|"),
             "noTimeLimit": b(cafe.get("noTimeLimit", "")),
             "smokingRoom": b(cafe.get("hasSmokingRoom", "")),
             "parking": b(cafe.get("hasParking", "")),
@@ -177,15 +181,31 @@ def update_store_info(cafe_id: int, patch: dict) -> dict | None:
             if k in amenities:
                 target[col] = "true" if amenities[k] else "false"
 
-        # 콘센트/조용함은 기존 필드(outletLevel, tags)에 반영
+        # 콘센트는 기존 필드(outletLevel)에도 반영 (손님 화면의 콘센트 여유 표시가 이 값을 쓴다).
+        # 태그 동기화는 아래 tag_amenity_map에서 함께 처리된다.
         if "outlet" in amenities:
             target["outletLevel"] = "many" if amenities["outlet"] else "normal"
-        if "quiet" in amenities:
+
+        # 조용함/공부/대화/넓은 테이블/심야 영업/콘센트는 손님 쪽 태그(cafe.tags)에 그대로 더하거나 뺀다.
+        # 카테고리 토글을 끄면 상세화면 태그 뱃지에서도 바로 빠져야 하므로 여기서 동기화한다.
+        # (상세화면 태그는 이 매핑을 통해서만 켜지므로, 토글 없이 존재하는 "고정" 태그는 없다.)
+        tag_amenity_map = {
+            "quiet": "quiet",
+            "study": "study",
+            "talk": "talk",
+            "wideTable": "wide-table",
+            "lateNight": "late-night",
+            "outlet": "outlet",
+        }
+        if any(k in amenities for k in tag_amenity_map):
             tags = [t for t in (target.get("tags") or "").split("|") if t]
-            if amenities["quiet"] and "quiet" not in tags:
-                tags.append("quiet")
-            elif not amenities["quiet"] and "quiet" in tags:
-                tags.remove("quiet")
+            for k, tag_value in tag_amenity_map.items():
+                if k not in amenities:
+                    continue
+                if amenities[k] and tag_value not in tags:
+                    tags.append(tag_value)
+                elif not amenities[k] and tag_value in tags:
+                    tags.remove(tag_value)
             target["tags"] = "|".join(tags)
 
         seats = patch.get("seats") or {}
